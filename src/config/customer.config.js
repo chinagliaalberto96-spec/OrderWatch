@@ -19,7 +19,7 @@ const customerConfig = {
   brand: {
     clientInitials: "GC",
     orderWatchInitials: "OW",
-    orderWatchLogoUrl: "/brand/orderwatch-logo.png",
+    orderWatchLogoUrl: "/brand/orderwatch-logo-trimmed.png",
     loginImageUrl: null
   },
   terminology: {

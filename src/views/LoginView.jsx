@@ -1,6 +1,8 @@
-import { BadgeCheck, CircleArrowRight, ClipboardList, Eye, EyeOff, Factory, FileLock2, LockKeyhole, Mail } from "lucide-react";
+import { BadgeCheck, ClipboardList, CircleArrowRight, Eye, EyeOff, Factory, FileLock2, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import Button from "../components/Button";
+
+const HERO_INK = "#141820";
 
 export default function LoginView({ config, onLogin }) {
   const accessCode = import.meta.env.VITE_ORDERWATCH_ACCESS_CODE || "graphic-demo-2026";
@@ -38,28 +40,26 @@ export default function LoginView({ config, onLogin }) {
   return (
     <div className="min-h-screen overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8" style={{ backgroundColor: "var(--color-background)" }}>
       <main className="mx-auto grid min-h-[calc(100vh-48px)] w-full max-w-[1720px] items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(400px,0.78fr)] xl:gap-24">
-        <section className="flex min-h-[660px] min-w-0 flex-col justify-between rounded-[32px] border bg-white p-7 shadow-soft sm:p-9 lg:p-11" style={{ borderColor: "var(--color-border)" }}>
-          <div className="flex min-h-[140px] items-center">
-            <div className="inline-flex rounded-[22px] bg-[#0F1726] px-10 py-8 shadow-soft">
-              {config.company.logoUrl ? (
-                <img className="h-32 w-auto max-w-[520px] object-contain" src={config.company.logoUrl} alt={config.company.name} />
-              ) : (
-                <div className="text-lg font-semibold text-white">{config.company.name}</div>
-              )}
-            </div>
+        <section className="flex min-h-[660px] min-w-0 flex-col justify-between overflow-hidden rounded-[32px] p-7 shadow-soft sm:p-10 lg:p-14" style={{ backgroundColor: HERO_INK }}>
+          <div className="flex min-h-[120px] items-center">
+            {config.company.logoUrl ? (
+              <img className="h-32 w-auto max-w-[420px] object-contain sm:h-40 lg:h-48" src={config.company.logoUrl} alt={config.company.name} />
+            ) : (
+              <div className="text-lg font-semibold text-white">{config.company.name}</div>
+            )}
           </div>
 
           <div className="max-w-[780px]">
-            <div className="inline-flex items-center gap-3 rounded-full border px-4 py-2 text-[15px] font-semibold" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 24%, white)", backgroundColor: "color-mix(in srgb, var(--color-accent) 9%, white)", color: "var(--color-primary)" }}>
+            <div className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-[15px] font-semibold text-white/90">
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--color-accent)" }} />
               Pilota operativo OrderWatch
             </div>
 
-            <h1 className="mt-8 max-w-[760px] text-[42px] font-semibold leading-[1.04] tracking-[-0.02em] sm:text-[54px] xl:text-[64px]" style={{ color: "var(--color-primary)" }}>
+            <h1 className="mt-8 max-w-[760px] text-[42px] font-semibold leading-[1.04] tracking-[-0.02em] text-white sm:text-[54px] xl:text-[64px]">
               Ogni mattina sai quali materiali sono a rischio.
             </h1>
 
-            <p className="mt-7 max-w-[610px] text-[20px] leading-8" style={{ color: "var(--color-text-muted)" }}>
+            <p className="mt-7 max-w-[610px] text-[20px] leading-8 text-white/70">
               OrderWatch monitora ordini materiali, fornitori, PDF, DDT e scadenze dei lavori in corso.
             </p>
 
@@ -71,18 +71,16 @@ export default function LoginView({ config, onLogin }) {
               ].map((item) => {
                 const Icon = item.icon;
                 return (
-                  <div key={item.label} className="min-h-[136px] rounded-[22px] border bg-white p-5" style={{ borderColor: "var(--color-border)" }}>
+                  <div key={item.label} className="min-h-[136px] rounded-[22px] border border-white/10 bg-white/[0.06] p-5">
                     <Icon className="h-7 w-7" strokeWidth={2.2} style={{ color: "var(--color-accent)" }} />
-                    <div className="mt-6 max-w-[150px] text-[16px] font-semibold leading-5" style={{ color: "var(--color-primary)" }}>
-                      {item.label}
-                    </div>
+                    <div className="mt-6 max-w-[150px] text-[16px] font-semibold leading-5 text-white">{item.label}</div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-[15px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+          <div className="flex items-center gap-3 text-[15px] font-medium text-white/60">
             <FileLock2 className="h-5 w-5" />
             Accesso riservato agli utenti autorizzati.
           </div>
@@ -90,21 +88,22 @@ export default function LoginView({ config, onLogin }) {
 
         <aside className="flex min-w-0 justify-center lg:justify-start">
           <form className="w-full max-w-[560px] rounded-[32px] border bg-white px-8 py-10 shadow-[0_22px_70px_rgba(17,24,39,0.10)] sm:px-10 lg:px-12 lg:py-12" style={{ borderColor: "var(--color-border)" }} onSubmit={handleSubmit}>
-            <div className="flex items-start justify-between gap-5">
+            <div className="flex flex-col items-center text-center">
               {config.brand?.orderWatchLogoUrl ? (
-                <img className="h-24 w-auto max-w-[340px] object-contain" src={config.brand.orderWatchLogoUrl} alt={config.product.name} />
+                <img className="h-16 w-auto max-w-[280px] object-contain sm:h-20 lg:h-24" src={config.brand.orderWatchLogoUrl} alt={config.product.name} />
               ) : (
                 <div className="text-xl font-semibold" style={{ color: "var(--color-primary)" }}>
                   {config.product.name}
                 </div>
               )}
-              <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-full border text-[13px] font-semibold" style={{ borderColor: "var(--color-border)", backgroundColor: "#F8F8F7", color: "var(--color-primary)" }}>
-                <FileLock2 className="h-4 w-4" />
-                Pilot
+
+              <div className="mt-5 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13px] font-semibold" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 24%, white)", backgroundColor: "color-mix(in srgb, var(--color-accent) 8%, white)", color: "var(--color-accent)" }}>
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Accesso pilota
               </div>
             </div>
 
-            <div className="mt-12">
+            <div className="mt-10">
               <h2 className="text-[34px] font-semibold leading-tight tracking-[-0.01em] sm:text-[40px]" style={{ color: "var(--color-primary)" }}>
                 Accedi alla dashboard
               </h2>
@@ -164,16 +163,9 @@ export default function LoginView({ config, onLogin }) {
               <CircleArrowRight className="h-5 w-5" />
             </Button>
 
-            <p className="mt-8 text-[15px] font-medium leading-6" style={{ color: "var(--color-text-muted)" }}>
+            <p className="mt-8 text-center text-[15px] font-medium leading-6" style={{ color: "var(--color-text-muted)" }}>
               Versione pilota collegata ai dati operativi Graphic Center.
             </p>
-
-            <div className="mt-8 border-t pt-7" style={{ borderColor: "var(--color-border)" }}>
-              <div className="flex items-center justify-center gap-3 text-[15px] font-semibold" style={{ color: "var(--color-primary)" }}>
-                <span className="h-5 w-5 rounded-md" style={{ backgroundColor: "var(--color-primary)" }} />
-                Powered by OrderWatch
-              </div>
-            </div>
           </form>
         </aside>
       </main>
