@@ -40,9 +40,9 @@ export default function LoginView({ config, onLogin }) {
       <main className="mx-auto grid min-h-[calc(100vh-48px)] w-full max-w-[1720px] items-center gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(400px,0.78fr)] xl:gap-24">
         <section className="flex min-h-[660px] min-w-0 flex-col justify-between rounded-[32px] border bg-white p-7 shadow-soft sm:p-9 lg:p-11" style={{ borderColor: "var(--color-border)" }}>
           <div className="flex min-h-[140px] items-center">
-            <div className="inline-flex rounded-[22px] bg-[#0F1726] px-8 py-6 shadow-soft">
+            <div className="inline-flex rounded-[22px] bg-[#0F1726] px-10 py-8 shadow-soft">
               {config.company.logoUrl ? (
-                <img className="h-20 w-auto max-w-[430px] object-contain" src={config.company.logoUrl} alt={config.company.name} />
+                <img className="h-32 w-auto max-w-[520px] object-contain" src={config.company.logoUrl} alt={config.company.name} />
               ) : (
                 <div className="text-lg font-semibold text-white">{config.company.name}</div>
               )}
@@ -92,7 +92,7 @@ export default function LoginView({ config, onLogin }) {
           <form className="w-full max-w-[560px] rounded-[32px] border bg-white px-8 py-10 shadow-[0_22px_70px_rgba(17,24,39,0.10)] sm:px-10 lg:px-12 lg:py-12" style={{ borderColor: "var(--color-border)" }} onSubmit={handleSubmit}>
             <div className="flex items-start justify-between gap-5">
               {config.brand?.orderWatchLogoUrl ? (
-                <img className="h-16 w-auto max-w-[280px] object-contain" src={config.brand.orderWatchLogoUrl} alt={config.product.name} />
+                <img className="h-24 w-auto max-w-[340px] object-contain" src={config.brand.orderWatchLogoUrl} alt={config.product.name} />
               ) : (
                 <div className="text-xl font-semibold" style={{ color: "var(--color-primary)" }}>
                   {config.product.name}
