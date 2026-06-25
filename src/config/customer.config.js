@@ -38,21 +38,33 @@ const customerConfig = {
     owner: "Responsabile"
   },
   // Palette "Ink & Paper" confermata dal cliente — ispirata alla stampa offset.
+  // Aggiunte varianti (dark/soft) e palette grafici per dare piu' carattere
+  // all'interfaccia senza cambiare i colori brand approvati.
   theme: {
     ...baseConfig.theme,
     primary: "#17213C", // blu inchiostro profondo
+    primaryDark: "#0E1526", // inchiostro ancora piu' profondo, per gradienti/hover
+    primarySoft: "#EAEDF3", // tinta tenue per sfondi e stati attivi
     accent: "#F0442E", // rosso tipografico
+    accentSoft: "#FCEAE6", // tinta tenue del rosso per badge/hover
     success: "#2D8653",
     warning: "#F59E0B",
     critical: "#C85B24",
     danger: "#DC2626",
     background: "#F8F7F4", // carta naturale
     sidebar: "#FFFFFF",
+    sidebarActive: "#17213C",
     card: "#FFFFFF",
     text: "#111827",
     textMuted: "#6B7280",
     border: "#E3DED6",
-    muted: "#F1ECE5"
+    muted: "#F1ECE5",
+    // Palette grafici derivata dai colori brand, per distinguere meglio le serie.
+    chart1: "#17213C",
+    chart2: "#F0442E",
+    chart3: "#F59E0B",
+    chart4: "#2D8653",
+    chart5: "#9CA9BE"
   },
   modules: {
     ...baseConfig.modules
@@ -76,7 +88,10 @@ const customerConfig = {
       "daysRemaining",
       "status",
       "owner"
-    ]
+    ],
+    suppliers: ["name", "email", "onTimeRate", "openOrders", "risk", "score"],
+    projects: ["projectCode", "customer", "owner", "status", "dueDate", "openOrders"],
+    documents: ["name", "type", "supplierName", "linkedOrder", "confidence", "receivedAt"]
   },
   // Ruoli previsti per Graphic Center, mappati su src/utils/permissions.js:
   //   Responsabile commerciale/operativo -> "admin" (vede e modifica tutto)

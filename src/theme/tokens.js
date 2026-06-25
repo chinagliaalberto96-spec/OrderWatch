@@ -1,8 +1,12 @@
 export const fallbackTokens = {
   primary: "#2563EB",
+  primaryDark: "#1D4ED8",
+  primarySoft: "#EFF4FE",
   accent: "#38BDF8",
+  accentSoft: "#E6F7FF",
   background: "#F6F8FB",
   sidebar: "#FFFFFF",
+  sidebarActive: "#2563EB",
   card: "#FFFFFF",
   text: "#111827",
   textMuted: "#64748B",
@@ -11,5 +15,10 @@ export const fallbackTokens = {
   warning: "#F59E0B",
   critical: "#F97316",
   danger: "#DC2626",
-  muted: "#EEF2F7"
+  muted: "#EEF2F7",
+  chart1: "#2563EB",
+  chart2: "#38BDF8",
+  chart3: "#F59E0B",
+  chart4: "#16A34A",
+  chart5: "#94A3B8"
 };

@@ -24,7 +24,19 @@ export function humanizeColumn(column, terminology) {
     status: "Stato",
     owner: terminology.owner,
     quantity: "Quantita",
-    aiConfidence: "AI confidence"
+    aiConfidence: "AI confidence",
+    // Colonne tabelle Fornitori / Lavori / Documenti.
+    name: "Nome",
+    email: "Email",
+    onTimeRate: "Puntualita",
+    openOrders: terminology.ordersPlural,
+    risk: "Rischio",
+    score: "Score",
+    customer: terminology.customer,
+    type: "Tipo",
+    linkedOrder: terminology.orderSingular,
+    confidence: "AI confidence",
+    receivedAt: "Ricevuto il"
   };
   return labels[column] || column;
 }

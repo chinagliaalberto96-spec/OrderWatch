@@ -1,3 +1,4 @@
+import { AlertTriangle, Boxes, Send, TrendingUp } from "lucide-react";
 import ActivityFeed from "../components/ActivityFeed";
 import Card from "../components/Card";
 import ChartCard from "../components/ChartCard";
@@ -62,14 +63,32 @@ export default function DashboardView({ config, data }) {
         </div>
       </section>
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <KpiCard label={`${config.terminology.projectsPlural} aperti`} value={openProjects} hint="Lavori non ancora conclusi" />
-        <KpiCard label="Azioni richieste" value={actionsNeeded} tone={actionsNeeded ? "danger" : "success"} hint="Scaduti, critici o da verificare" />
-        <KpiCard label="Solleciti inviati" value={remindersSent} tone="warning" hint="Totale solleciti su ordini aperti" />
+        <KpiCard
+          label={`${config.terminology.projectsPlural} aperti`}
+          value={openProjects}
+          hint="Lavori non ancora conclusi"
+          icon={Boxes}
+        />
+        <KpiCard
+          label="Azioni richieste"
+          value={actionsNeeded}
+          tone={actionsNeeded ? "danger" : "success"}
+          hint="Scaduti, critici o da verificare"
+          icon={AlertTriangle}
+        />
+        <KpiCard
+          label="Solleciti inviati"
+          value={remindersSent}
+          tone="warning"
+          hint="Totale solleciti su ordini aperti"
+          icon={Send}
+        />
         <KpiCard
           label="Tasso risposta fornitori"
           value={responseRate === null ? "-" : formatPercent(responseRate)}
           tone={responseRate !== null && responseRate < 0.5 ? "danger" : "primary"}
           hint="Risposte ricevute su solleciti inviati"
+          icon={TrendingUp}
         />
       </div>
       <div className="grid gap-4 xl:grid-cols-[1.35fr_1fr]">

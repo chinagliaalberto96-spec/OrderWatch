@@ -16,10 +16,18 @@ export default function DataTable({ columns, rows, renderCell, onRowClick }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row, index) => (
             <tr
               key={row.id}
-              className={onRowClick ? "cursor-pointer hover:bg-slate-50" : ""}
+              className={`transition-colors ${onRowClick ? "cursor-pointer" : ""}`}
+              style={{ backgroundColor: index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)" }}
+              onMouseEnter={(event) => {
+                if (onRowClick) event.currentTarget.style.backgroundColor = "var(--color-primary-soft)";
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.backgroundColor =
+                  index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)";
+              }}
               onClick={() => onRowClick?.(row)}
             >
               {columns.map((column) => (

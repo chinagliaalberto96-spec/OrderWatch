@@ -1,17 +1,13 @@
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
 import { formatDate } from "../utils/dateUtils";
-import { formatPercent } from "../utils/formatters";
+import { formatPercent, humanizeColumn } from "../utils/formatters";
 
 export default function DocumentsView({ config, documents }) {
-  const columns = [
-    { key: "name", label: "File" },
-    { key: "type", label: "Tipo" },
-    { key: "supplierName", label: config.terminology.supplierSingular },
-    { key: "linkedOrder", label: config.terminology.orderSingular },
-    { key: "confidence", label: "AI confidence" },
-    { key: "receivedAt", label: "Ricevuto il" }
-  ];
+  const columns = (config.tableColumns.documents || []).map((key) => ({
+    key,
+    label: key === "name" ? "File" : humanizeColumn(key, config.terminology)
+  }));
 
   return (
     <Card title={config.terminology.documentsPlural}>

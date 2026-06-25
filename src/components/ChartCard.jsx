@@ -1,14 +1,18 @@
 import { ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import Card from "./Card";
 
-const fallbackColors = {
-  danger: "#DC2626",
-  critical: "#C85B24",
-  warning: "#F59E0B",
-  success: "#16A34A",
-  muted: "#6B7280",
-  primary: "#17213C"
-};
+function ChartTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
+  return (
+    <div
+      className="rounded-md border px-3 py-2 text-[13px] shadow-elevated"
+      style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)", color: "var(--color-text)" }}
+    >
+      <span className="font-semibold">{point.name}</span>: {point.value}
+    </div>
+  );
+}
 
 export default function ChartCard({ title, data, insight }) {
   return (
@@ -19,17 +23,21 @@ export default function ChartCard({ title, data, insight }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis dataKey="name" tick={{ fontSize: 12, fill: "var(--color-text-muted)" }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "var(--color-text-muted)" }} />
-            <Tooltip />
-            <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+            <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--color-muted)" }} />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={48}>
               {data.map((entry) => (
-                <Cell key={entry.name} fill={fallbackColors[entry.tone] || fallbackColors.primary} />
+                <Cell key={entry.name} fill={`var(--color-${entry.tone || "primary"})`} />
               ))}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
       {insight && (
-        <div className="mt-3 rounded-md border px-3 py-2 text-[13px]" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)", color: "var(--color-text-muted)" }}>
+        <div
+          className="mt-3 flex items-center gap-2 rounded-md border px-3 py-2 text-[13px]"
+          style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)", color: "var(--color-text-muted)" }}
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "var(--color-accent)" }} />
           {insight}
         </div>
       )}

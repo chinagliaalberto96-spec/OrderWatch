@@ -7,7 +7,8 @@ export default {
         sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"]
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(15, 23, 42, 0.06)"
+        soft: "0 1px 2px rgba(15, 23, 42, 0.06)",
+        elevated: "0 8px 20px rgba(15, 23, 42, 0.10)"
       }
     }
   },
