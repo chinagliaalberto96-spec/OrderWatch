@@ -15,6 +15,14 @@ body {
   min-width: 1024px;
   background: var(--color-background);
   color: var(--color-text);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+h1,
+h2,
+h3,
+.font-heading {
+  font-family: "Manrope", ui-sans-serif, system-ui, sans-serif;
 }
 
 button,

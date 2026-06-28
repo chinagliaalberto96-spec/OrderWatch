@@ -8,6 +8,7 @@ import { createTheme } from "./theme/createTheme";
 import { filterRows } from "./utils/search";
 import DashboardView from "./views/DashboardView";
 import DocumentsView from "./views/DocumentsView";
+import ImportsView from "./views/ImportsView";
 import LoginView from "./views/LoginView";
 import OrdersView from "./views/OrdersView";
 import ProjectsView from "./views/ProjectsView";
@@ -20,6 +21,7 @@ const viewLabels = (terminology) => ({
   projects: terminology.projectsPlural,
   suppliers: terminology.suppliersPlural,
   documents: terminology.documentsPlural,
+  imports: terminology.importsPlural || "Importazioni",
   settings: "Impostazioni"
 });
 
@@ -47,7 +49,7 @@ export default function App() {
 
   const navItems = useMemo(
     () =>
-      ["dashboard", "orders", "projects", "suppliers", "documents", "settings"]
+      ["dashboard", "orders", "projects", "suppliers", "documents", "imports", "settings"]
         .filter((key) => config.modules[key])
         .map((key) => ({ key, label: labels[key] })),
     [config.modules, labels]
@@ -118,7 +120,8 @@ export default function App() {
       orders: filterRows(data.orders, searchQuery),
       projects: filterRows(data.projects, searchQuery),
       suppliers: filterRows(data.suppliers, searchQuery),
-      documents: filterRows(data.documents, searchQuery)
+      documents: filterRows(data.documents, searchQuery),
+      processedEmails: filterRows(data.processedEmails || [], searchQuery)
     };
   }, [data, searchQuery]);
 
@@ -189,6 +192,7 @@ export default function App() {
           {activeView === "projects" && <ProjectsView config={config} projects={filteredData.projects} />}
           {activeView === "suppliers" && <SuppliersView config={config} suppliers={filteredData.suppliers} />}
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
+          {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} />}
           {activeView === "settings" && (
             <SettingsView
               config={config}
@@ -200,6 +204,7 @@ export default function App() {
                   projects: data.projects.length,
                   suppliers: data.suppliers.length,
                   documents: data.documents.length,
+                  processedEmails: data.processedEmails?.length || 0,
                   review: reviewItems.length
                 }
               }}

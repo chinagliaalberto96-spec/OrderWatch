@@ -91,7 +91,11 @@ const customerConfig = {
     ],
     suppliers: ["name", "email", "onTimeRate", "openOrders", "risk", "score"],
     projects: ["projectCode", "customer", "owner", "status", "dueDate", "openOrders"],
-    documents: ["name", "type", "supplierName", "linkedOrder", "confidence", "receivedAt"]
+    documents: ["name", "type", "supplierName", "linkedOrder", "confidence", "receivedAt"],
+    // Aggiunta: mancava la colonna per la pagina Importazioni (ImportsView), che
+    // quindi mostrava una tabella senza colonne in produzione. linkedProjectCode
+    // (non linkedOrderCode, che non esiste nella tabella Airtable "Processed Emails").
+    processedEmails: ["receivedAt", "subject", "from", "classification", "status", "linkedProjectCode", "errorDetail"]
   },
   // Ruoli previsti per Graphic Center, mappati su src/utils/permissions.js:
   //   Responsabile commerciale/operativo -> "admin" (vede e modifica tutto)

@@ -4,6 +4,8 @@ import { mockOrders } from "../data/mockOrders";
 import { mockProjects } from "../data/mockProjects";
 import { mockSuppliers } from "../data/mockSuppliers";
 
+const mockProcessedEmails = [];
+
 export const mockAdapter = {
   async getDashboardData() {
     return {
@@ -11,7 +13,8 @@ export const mockAdapter = {
       projects: mockProjects,
       suppliers: mockSuppliers,
       documents: mockDocuments,
-      activities: mockActivities
+      activities: mockActivities,
+      processedEmails: mockProcessedEmails
     };
   },
   async getOrders() {
@@ -28,5 +31,8 @@ export const mockAdapter = {
   },
   async getActivities() {
     return mockActivities;
+  },
+  async getProcessedEmails() {
+    return mockProcessedEmails;
   }
 };

@@ -1,4 +1,4 @@
-import { AlertTriangle, Boxes, Send, TrendingUp } from "lucide-react";
+import { AlertTriangle, Boxes, Inbox, Send, TrendingUp } from "lucide-react";
 import ActivityFeed from "../components/ActivityFeed";
 import Card from "../components/Card";
 import ChartCard from "../components/ChartCard";
@@ -22,6 +22,13 @@ export default function DashboardView({ config, data }) {
   ).length;
 
   const remindersSent = ordersWithStatus.reduce((sum, order) => sum + (order.reminderCount || 0), 0);
+  const processedEmails = [...(data.processedEmails || [])].sort((a, b) => {
+    const aDate = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
+    const bDate = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
+    return bDate - aDate;
+  });
+  const importErrors = processedEmails.filter((email) => email.status === "Error").length;
+  const importsInProgress = processedEmails.filter((email) => email.status?.trim() === "Processing").length;
 
   const solicitedOrders = ordersWithStatus.filter((order) => order.reminderCount > 0);
   const respondedOrders = solicitedOrders.filter(
@@ -101,6 +108,44 @@ export default function DashboardView({ config, data }) {
           <ActivityFeed activities={data.activities} />
         </Card>
       </div>
+      <Card title="Importazioni recenti">
+        <div className="grid gap-3 lg:grid-cols-[220px_220px_1fr]">
+          <div className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Inbox className="h-4 w-4" />
+              Email lette
+            </div>
+            <div className="mt-2 text-2xl font-semibold">{processedEmails.length}</div>
+          </div>
+          <div className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
+            <div className="text-sm font-semibold">Stato importazione</div>
+            <div className="mt-2 text-sm" style={{ color: importErrors ? "var(--color-danger)" : "var(--color-success)" }}>
+              {importErrors ? `${importErrors} errori da controllare` : "Nessun errore"}
+            </div>
+            <div className="mt-1 text-sm" style={{ color: importsInProgress ? "var(--color-warning)" : "var(--color-text-muted)" }}>
+              {importsInProgress ? `${importsInProgress} in lavorazione` : "Nessun blocco in Processing"}
+            </div>
+          </div>
+          <div className="min-w-0 rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
+            <div className="mb-2 text-sm font-semibold">Ultime email processate</div>
+            <div className="space-y-2">
+              {processedEmails.slice(0, 3).map((email) => (
+                <div key={email.id} className="flex min-w-0 items-center justify-between gap-3 text-sm">
+                  <div className="min-w-0 truncate">{email.subject || email.messageId || "Email senza oggetto"}</div>
+                  <div className="shrink-0 font-semibold" style={{ color: email.status === "Error" ? "var(--color-danger)" : "var(--color-text-muted)" }}>
+                    {email.classification || email.status || "-"}
+                  </div>
+                </div>
+              ))}
+              {!processedEmails.length && (
+                <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+                  Nessuna email importata.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Card>
       <Card title={`${config.terminology.ordersPlural} in evidenza`}>
         <div className="space-y-3">
           {ordersWithStatus.slice(0, 4).map((order) => (

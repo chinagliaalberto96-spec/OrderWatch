@@ -1,36 +1,30 @@
-import { ResponsiveContainer, BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import Card from "./Card";
 
-function ChartTooltip({ active, payload }) {
-  if (!active || !payload?.length) return null;
-  const point = payload[0].payload;
-  return (
-    <div
-      className="rounded-md border px-3 py-2 text-[13px] shadow-elevated"
-      style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)", color: "var(--color-text)" }}
-    >
-      <span className="font-semibold">{point.name}</span>: {point.value}
-    </div>
-  );
-}
-
 export default function ChartCard({ title, data, insight }) {
+  const maxValue = Math.max(...data.map((item) => item.value), 1);
+
   return (
     <Card title={title}>
-      <div className="h-52">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-            <XAxis dataKey="name" tick={{ fontSize: 12, fill: "var(--color-text-muted)" }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "var(--color-text-muted)" }} />
-            <Tooltip content={<ChartTooltip />} cursor={{ fill: "var(--color-muted)" }} />
-            <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={48}>
-              {data.map((entry) => (
-                <Cell key={entry.name} fill={`var(--color-${entry.tone || "primary"})`} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+      <div className="grid h-52 grid-cols-5 items-end gap-3 border-b px-1 pb-7" style={{ borderColor: "var(--color-border)" }}>
+        {data.map((entry) => {
+          const height = `${Math.max((entry.value / maxValue) * 100, entry.value ? 12 : 2)}%`;
+          return (
+            <div key={entry.name} className="relative flex h-full min-w-0 flex-col items-center justify-end gap-2">
+              <div
+                className="w-full max-w-12 rounded-t-md"
+                title={`${entry.name}: ${entry.value}`}
+                style={{
+                  height,
+                  backgroundColor: `var(--color-${entry.tone || "primary"})`
+                }}
+              />
+              <div className="absolute -bottom-7 max-w-full truncate text-center text-[11px]" style={{ color: "var(--color-text-muted)" }}>
+                {entry.name}
+              </div>
+              <div className="text-xs font-semibold">{entry.value}</div>
+            </div>
+          );
+        })}
       </div>
       {insight && (
         <div

@@ -36,7 +36,13 @@ export function humanizeColumn(column, terminology) {
     type: "Tipo",
     linkedOrder: terminology.orderSingular,
     confidence: "AI confidence",
-    receivedAt: "Ricevuto il"
+    receivedAt: "Ricevuto il",
+    subject: "Oggetto",
+    from: "Mittente",
+    classification: "Classificazione",
+    linkedOrderCode: "Ordine collegato",
+    linkedProjectCode: "Lavoro collegato",
+    errorDetail: "Errore"
   };
   return labels[column] || column;
 }

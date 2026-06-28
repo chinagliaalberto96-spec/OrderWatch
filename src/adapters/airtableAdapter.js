@@ -11,7 +11,8 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     projects: tableNames.projects || "Projects",
     suppliers: tableNames.suppliers || "Suppliers",
     documents: tableNames.documents || "Documents",
-    activities: tableNames.activities || "Activities"
+    activities: tableNames.activities || "Activities",
+    processedEmails: tableNames.processedEmails || "Processed Emails"
   };
 
   const fieldMaps = {
@@ -67,6 +68,20 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
       Detail: "detail",
       "Order Code": "orderCode",
       Date: "date"
+    },
+    processedEmails: {
+      "Message ID": "messageId",
+      From: "from",
+      Subjet: "subject",
+      Subject: "subject",
+      "Received At": "receivedAt",
+      Classification: "classification",
+      Status: "status",
+      "Linked Project Code": "linkedProjectCode",
+      "Linked Order Code": "linkedOrderCode",
+      "Error Detail": "errorDetail",
+      "Pre-Classification": "preClassification",
+      "Final Classification": "finalClassification"
     }
   };
 
@@ -135,12 +150,22 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     return response.json();
   }
 
+  function normalizeAirtableValue(value) {
+    if (Array.isArray(value)) {
+      return value.map(normalizeAirtableValue);
+    }
+    if (value && typeof value === "object" && "name" in value && "id" in value) {
+      return value.name;
+    }
+    return value;
+  }
+
   function mapRecords(entityKey, data) {
     const map = fieldMaps[entityKey] || {};
     return data.records.map((record) => {
       const mapped = { id: record.id };
       for (const [airtableName, value] of Object.entries(record.fields)) {
-        mapped[map[airtableName] || airtableName] = value;
+        mapped[map[airtableName] || airtableName] = normalizeAirtableValue(value);
       }
       return mapped;
     });
@@ -148,14 +173,15 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
 
   return {
     async getDashboardData() {
-      const [orders, projects, suppliers, documents, activities] = await Promise.all([
+      const [orders, projects, suppliers, documents, activities, processedEmails] = await Promise.all([
         this.getOrders(),
         this.getProjects(),
         this.getSuppliers(),
         this.getDocuments(),
-        this.getActivities()
+        this.getActivities(),
+        this.getProcessedEmails()
       ]);
-      return { orders, projects, suppliers, documents, activities };
+      return { orders, projects, suppliers, documents, activities, processedEmails };
     },
     async getOrders() {
       return mapRecords("orders", await request(tables.orders));
@@ -171,6 +197,9 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     },
     async getActivities() {
       return mapRecords("activities", await request(tables.activities));
+    },
+    async getProcessedEmails() {
+      return mapRecords("processedEmails", await request(tables.processedEmails));
     },
     async updateOrder(recordId, fields) {
       return updateRecord(tables.orders, recordId, toAirtableFields("orders", fields));

@@ -4,7 +4,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"]
+        // Coppia tipografica ufficiale OrderWatch: Manrope per titoli/brand,
+        // IBM Plex Sans per il corpo testo. Caricati via Google Fonts in index.html.
+        sans: ["IBM Plex Sans", "ui-sans-serif", "system-ui", "sans-serif"],
+        heading: ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"]
       },
       boxShadow: {
         soft: "0 1px 2px rgba(15, 23, 42, 0.06)",

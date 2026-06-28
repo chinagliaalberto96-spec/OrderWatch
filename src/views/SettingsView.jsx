@@ -23,7 +23,11 @@ export default function SettingsView({ config, meta = {} }) {
           <div className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
             <div style={{ color: "var(--color-text-muted)" }}>Record totali</div>
             <div className="mt-1 text-lg font-semibold">
-              {(counts.orders || 0) + (counts.projects || 0) + (counts.suppliers || 0) + (counts.documents || 0)}
+              {(counts.orders || 0) +
+                (counts.projects || 0) +
+                (counts.suppliers || 0) +
+                (counts.documents || 0) +
+                (counts.processedEmails || 0)}
             </div>
           </div>
           <div className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>

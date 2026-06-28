@@ -1,5 +1,6 @@
-import { BarChart3, Boxes, FileText, LayoutDashboard, Settings, Truck } from "lucide-react";
+import { BarChart3, Boxes, FileText, Inbox, LayoutDashboard, Settings, Truck } from "lucide-react";
 import Button from "./Button";
+import OrderWatchMark from "./OrderWatchMark";
 
 const icons = {
   dashboard: LayoutDashboard,
@@ -7,6 +8,7 @@ const icons = {
   projects: BarChart3,
   suppliers: Truck,
   documents: FileText,
+  imports: Inbox,
   settings: Settings
 };
 
@@ -61,13 +63,7 @@ export default function Sidebar({ config, navItems, activeView, onNavigate }) {
           <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-muted)" }}>
             Powered by
           </div>
-          {config.brand?.orderWatchLogoUrl ? (
-            <img className="mt-3 h-12 w-auto max-w-[190px] object-contain" src={config.brand.orderWatchLogoUrl} alt={config.product.name} />
-          ) : (
-            <div className="mt-3 text-lg font-semibold" style={{ color: "var(--color-primary)" }}>
-              {config.product.name}
-            </div>
-          )}
+          <OrderWatchMark variant="full" size="sm" className="mt-3" />
         </div>
       </div>
     </aside>
