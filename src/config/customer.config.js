@@ -8,7 +8,10 @@ const customerConfig = {
   ...baseConfig,
   product: {
     name: "OrderWatch",
-    tagline: "Monitoraggio ordini materiali — Graphic Center Group"
+    // Niente nome cliente qui: nella dashboard il nome cliente compare SOLO
+    // come testo in Topbar (in alto a destra). Questa tagline e' generica
+    // e visibile in piu' punti (Sidebar, Topbar), quindi resta client-agnostic.
+    tagline: "Monitoraggio ordini materiali"
   },
   company: {
     ...baseConfig.company,
@@ -38,8 +41,10 @@ const customerConfig = {
     owner: "Responsabile"
   },
   // Palette "Ink & Paper" confermata dal cliente — ispirata alla stampa offset.
-  // Aggiunte varianti (dark/soft) e palette grafici per dare piu' carattere
-  // all'interfaccia senza cambiare i colori brand approvati.
+  // Da giugno 2026: usata SOLO nella pagina di Login (vedi src/App.jsx,
+  // loginThemeStyle). La dashboard vera e propria non usa piu' questa
+  // palette: mostra sempre il brand ufficiale OrderWatch "Graphite & Coral"
+  // (base.config.js), con il nome del cliente solo come testo in Topbar.
   theme: {
     ...baseConfig.theme,
     primary: "#17213C", // blu inchiostro profondo

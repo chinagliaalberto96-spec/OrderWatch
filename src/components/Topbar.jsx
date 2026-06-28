@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Bell, LogOut, RefreshCw, Search } from "lucide-react";
+import { Bell, Building2, LogOut, RefreshCw, Search } from "lucide-react";
 import Button from "./Button";
 
 export default function Topbar({
   title,
   tagline,
+  companyName,
   userEmail,
   onLogout,
   searchQuery = "",
@@ -37,6 +38,18 @@ export default function Topbar({
         </div>
       </div>
       <div className="flex items-center gap-3">
+        {companyName && (
+          <>
+            <div
+              className="hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] font-semibold sm:flex"
+              style={{ borderColor: "var(--color-border)", color: "var(--color-text)", backgroundColor: "var(--color-muted)" }}
+            >
+              <Building2 className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--color-text-muted)" }} />
+              <span className="max-w-44 truncate">{companyName}</span>
+            </div>
+            <div className="hidden h-6 w-px sm:block" style={{ backgroundColor: "var(--color-border)" }} />
+          </>
+        )}
         {lastUpdated && (
           <span className="hidden text-xs lg:block" style={{ color: "var(--color-text-muted)" }}>
             Aggiornato alle{" "}

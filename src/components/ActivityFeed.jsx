@@ -32,7 +32,7 @@ export default function ActivityFeed({ activities }) {
         const tone = activity.type === "alert" ? "danger" : activity.type === "reminder" ? "warning" : "primary";
 
         return (
-          <div key={activity.id} className="flex gap-3 rounded-md px-2 py-3">
+          <div key={activity.id} className="flex gap-3 rounded-md px-2 py-2">
             <div
               className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
               style={{
@@ -42,7 +42,7 @@ export default function ActivityFeed({ activities }) {
             >
               <Icon className="h-3.5 w-3.5" />
             </div>
-            <div className="min-w-0 flex-1 border-b pb-3 last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+            <div className="min-w-0 flex-1 border-b pb-2 last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
               <div className="flex items-start justify-between gap-3">
                 <div className="text-sm font-semibold leading-5">{activity.title}</div>
                 <div className="shrink-0 text-xs" style={{ color: "var(--color-text-muted)" }}>

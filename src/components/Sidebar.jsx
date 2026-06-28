@@ -1,7 +1,10 @@
 import { BarChart3, Boxes, FileText, Inbox, LayoutDashboard, Settings, Truck } from "lucide-react";
-import Button from "./Button";
 import OrderWatchMark from "./OrderWatchMark";
 
+// Sidebar v2 (giugno 2026): identita' sempre OrderWatch (nessun nome/colore
+// cliente qui dentro — il cliente compare solo come testo in Topbar).
+// Logo allineato a sinistra (non centrato), nav con accento corallo a sinistra
+// dell'item attivo e icona in contenitore arrotondato, stile prodotto SaaS.
 const icons = {
   dashboard: LayoutDashboard,
   orders: Boxes,
@@ -13,57 +16,55 @@ const icons = {
 };
 
 export default function Sidebar({ config, navItems, activeView, onNavigate }) {
-  const initials = config.brand?.clientInitials || config.company.name?.slice(0, 2)?.toUpperCase();
-
   return (
-    <aside className="flex w-[260px] shrink-0 flex-col border-r" style={{ backgroundColor: "var(--color-sidebar)", borderColor: "var(--color-border)" }}>
-      <div
-        className="px-4 py-5"
-        style={{ background: "linear-gradient(135deg, var(--color-primary), var(--color-primary-dark))" }}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          {initials && (
-            <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold text-white"
-              style={{ backgroundColor: "rgba(255,255,255,0.16)" }}
-            >
-              {initials}
-            </div>
-          )}
-          <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-white/60">Workspace</div>
-            <div className="truncate text-[15px] font-semibold text-white">{config.company.name}</div>
-          </div>
+    <aside className="flex w-[252px] shrink-0 flex-col border-r" style={{ backgroundColor: "var(--color-sidebar)", borderColor: "var(--color-border)" }}>
+      <div className="px-5 pb-5 pt-6">
+        <OrderWatchMark variant="full" size="md" />
+        <div className="mt-1.5 text-[12px] font-medium" style={{ color: "var(--color-text-muted)" }}>
+          {config.product.tagline}
         </div>
-        <div className="mt-2 truncate text-xs text-white/55">Pilota operativo</div>
       </div>
-      <nav className="space-y-1 px-3 py-4">
+      <nav className="flex-1 space-y-0.5 px-3">
         {navItems.map((item) => {
           const Icon = icons[item.key] || LayoutDashboard;
           const active = activeView === item.key;
           return (
-            <Button
+            <button
               key={item.key}
-              variant="ghost"
-              className={`w-full justify-start transition ${active ? "font-semibold shadow-soft" : ""}`}
+              type="button"
               onClick={() => onNavigate(item.key)}
+              className="relative flex w-full items-center gap-3 rounded-xl py-2.5 pl-3.5 pr-3 text-left text-[14px] transition"
               style={{
-                backgroundColor: active ? "var(--color-sidebar-active)" : "transparent",
-                color: active ? "#FFFFFF" : "var(--color-text)"
+                fontWeight: active ? 600 : 500,
+                color: active ? "var(--color-primary)" : "var(--color-text-muted)",
+                backgroundColor: active ? "var(--color-primary-soft)" : "transparent"
               }}
             >
-              <Icon className="h-4 w-4" />
-              {item.label}
-            </Button>
+              {active && (
+                <span
+                  className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full"
+                  style={{ backgroundColor: "var(--color-accent)" }}
+                  aria-hidden="true"
+                />
+              )}
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{
+                  backgroundColor: active ? "var(--color-card)" : "transparent",
+                  color: active ? "var(--color-primary)" : "var(--color-text-muted)"
+                }}
+              >
+                <Icon className="h-[17px] w-[17px]" strokeWidth={2.1} />
+              </span>
+              <span className="truncate">{item.label}</span>
+            </button>
           );
         })}
       </nav>
-      <div className="mt-auto border-t p-4" style={{ borderColor: "var(--color-border)" }}>
-        <div className="rounded-lg border px-4 py-4" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-primary-soft)" }}>
-          <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-muted)" }}>
-            Powered by
-          </div>
-          <OrderWatchMark variant="full" size="sm" className="mt-3" />
+      <div className="px-5 py-5">
+        <div className="flex items-center gap-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "var(--color-success)" }} aria-hidden="true" />
+          Dati live · Pilota operativo
         </div>
       </div>
     </aside>

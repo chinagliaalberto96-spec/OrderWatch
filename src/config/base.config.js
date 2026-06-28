@@ -24,10 +24,13 @@ const baseConfig = {
     customer: "Cliente",
     owner: "Responsabile"
   },
-  // Palette ufficiale OrderWatch "Graphite & Coral" — brand generico del prodotto,
-  // usato da ogni nuovo cliente finche' non viene definita una palette dedicata
-  // (es. Graphic Center Group ha la propria palette "Ink & Paper" in customer.config.js,
-  // che resta invariata e ha priorita' su questi valori).
+  // Palette ufficiale OrderWatch "Graphite & Coral" — brand di prodotto.
+  // Regola standard (giugno 2026): questa e' SEMPRE la palette usata dentro
+  // la dashboard (sidebar, topbar, ogni view), per qualsiasi cliente. Una
+  // eventuale palette dedicata definita nel customer.config (es. "Ink & Paper"
+  // di Graphic Center Group) viene applicata SOLO alla pagina di Login, non
+  // alla dashboard. Vedi src/App.jsx: appThemeStyle (da questo oggetto) per
+  // la dashboard, loginThemeStyle (da config.theme del cliente) solo per Login.
   theme: {
     primary: "#23262B", // graphite
     primaryDark: "#14161A",

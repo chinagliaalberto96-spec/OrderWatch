@@ -105,7 +105,12 @@ export default function DashboardView({ config, data }) {
           insight={mostUrgent ? `Priorita: ${mostUrgent.orderCode} - ${mostUrgent.material}` : "Nessuna priorita critica al momento."}
         />
         <Card title="Activity log">
-          <ActivityFeed activities={data.activities} />
+          {/* Altezza limitata + scroll interno: tenuta in pari col chart a
+              fianco, cosi' le card sotto (Importazioni, Ordini in evidenza)
+              restano visibili senza dover scrollare la pagina. */}
+          <div className="max-h-[252px] overflow-y-auto pr-1">
+            <ActivityFeed activities={data.activities.slice(0, 6)} />
+          </div>
         </Card>
       </div>
       <Card title="Importazioni recenti">

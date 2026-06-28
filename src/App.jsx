@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
+import baseConfig from "./config/base.config";
 import customerConfig from "./config/customer.config";
 import { mockAdapter } from "./adapters/mockAdapter";
 import { apiAdapter } from "./adapters/apiAdapter";
@@ -44,7 +45,14 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const themeStyle = createTheme(config.theme);
+  // Regola di prodotto (giugno 2026): la palette del cliente (config.theme,
+  // es. "Ink & Paper" di Graphic Center) si vede SOLO nella pagina di Login.
+  // Tutta la dashboard (sidebar, topbar, ogni view) usa sempre il brand
+  // ufficiale OrderWatch "Graphite & Coral" definito in base.config.js,
+  // indipendentemente dal cliente loggato. L'unico riferimento al cliente
+  // dentro la dashboard e' il nome azienda mostrato in Topbar.
+  const loginThemeStyle = createTheme(config.theme);
+  const appThemeStyle = createTheme(baseConfig.theme);
   const labels = viewLabels(config.terminology);
 
   const navItems = useMemo(
@@ -144,7 +152,7 @@ export default function App() {
 
   if (!sessionUser) {
     return (
-      <div style={themeStyle}>
+      <div style={loginThemeStyle}>
         <LoginView config={config} onLogin={handleLogin} />
       </div>
     );
@@ -152,7 +160,7 @@ export default function App() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6 text-center" style={themeStyle}>
+      <div className="flex min-h-screen items-center justify-center p-6 text-center" style={appThemeStyle}>
         <div>
           <p className="font-semibold text-[color:var(--color-danger)]">Errore nel caricamento dati Airtable</p>
           <p className="mt-2 text-sm text-[color:var(--color-text-muted)]">{error}</p>
@@ -163,19 +171,20 @@ export default function App() {
 
   if (!data) {
     return (
-      <div className="flex min-h-screen items-center justify-center" style={themeStyle}>
+      <div className="flex min-h-screen items-center justify-center" style={appThemeStyle}>
         <p className="text-sm text-[color:var(--color-text-muted)]">Caricamento dati...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen" style={themeStyle}>
+    <div className="flex min-h-screen" style={appThemeStyle}>
       <Sidebar config={config} navItems={navItems} activeView={activeView} onNavigate={setActiveView} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
           title={currentTitle}
           tagline={config.product.tagline}
+          companyName={config.company.name}
           userEmail={sessionUser.email}
           onLogout={handleLogout}
           searchQuery={searchQuery}
