@@ -205,6 +205,7 @@ export default function App() {
           {activeView === "settings" && (
             <SettingsView
               config={config}
+              data={data}
               meta={{
                 mode: USES_MOCK_DATA ? "mock" : "live",
                 lastUpdated,
