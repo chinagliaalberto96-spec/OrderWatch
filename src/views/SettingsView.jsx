@@ -1,16 +1,14 @@
 import {
-  AlertTriangle,
   Bell,
   CheckCircle2,
-  Clock3,
+  ChevronDown,
+  ChevronRight,
   Database,
   Mail,
-  ShieldCheck,
   SlidersHorizontal,
-  Workflow,
-  XCircle
+  Workflow
 } from "lucide-react";
-import Card from "../components/Card";
+import { useState } from "react";
 import { formatDate } from "../utils/dateUtils";
 
 const channelStatus = {
@@ -19,39 +17,74 @@ const channelStatus = {
   manual: { label: "Gestione manuale", tone: "muted" }
 };
 
-function StatBox({ label, value, tone = "text", icon: Icon }) {
+const thresholdLabels = {
+  warningDays: { label: "Soglia attenzione", unit: "giorni" },
+  criticalDays: { label: "Soglia critica", unit: "giorni" },
+  overdueDays: { label: "Soglia scaduto", unit: "giorni" },
+  reminderDaysBeforeDue: { label: "Promemoria fornitore", unit: "giorni prima" },
+  escalationDaysBeforeDue: { label: "Escalation interna", unit: "giorni prima" }
+};
+
+// Sezione richiudibile in stile pannello admin: header a riga con chevron,
+// contenuto nascosto di default tranne dove serve lettura immediata
+// (vedi defaultOpen sotto). Nessuna card annidata: il contenitore esterno
+// unico fa da cornice, ogni sezione e' solo una riga + corpo.
+function Section({ title, hint, defaultOpen = false, right, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+
   return (
-    <div className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>
-          {label}
-        </div>
-        {Icon && <Icon className="h-4 w-4" style={{ color: `var(--color-${tone})` }} />}
-      </div>
-      <div className="mt-2 text-2xl font-semibold" style={{ color: `var(--color-${tone})` }}>
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-4 px-5 py-3.5 text-left"
+      >
+        <span className="flex min-w-0 items-center gap-2.5">
+          {open ? (
+            <ChevronDown className="h-4 w-4 shrink-0" style={{ color: "var(--color-text-muted)" }} />
+          ) : (
+            <ChevronRight className="h-4 w-4 shrink-0" style={{ color: "var(--color-text-muted)" }} />
+          )}
+          <span className="truncate text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>
+            {title}
+          </span>
+          {hint && (
+            <span className="truncate text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>
+              {hint}
+            </span>
+          )}
+        </span>
+        {right}
+      </button>
+      {open && <div className="px-5 pb-5">{children}</div>}
+    </div>
+  );
+}
+
+function StatInline({ label, value, tone = "text" }) {
+  return (
+    <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>
+        {label}
+      </span>
+      <span className="text-[13.5px] font-semibold tabular-nums" style={{ color: `var(--color-${tone})` }}>
         {value}
-      </div>
+      </span>
     </div>
   );
 }
 
 function HealthRow({ label, description, status, tone = "success", icon: Icon = CheckCircle2 }) {
   return (
-    <div className="grid grid-cols-[22px_1fr_150px] items-center gap-3 border-b py-3 last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+    <div className="grid grid-cols-[20px_1fr_140px] items-center gap-3 border-b py-3 last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
       <Icon className="h-4 w-4" style={{ color: `var(--color-${tone})` }} />
       <div className="min-w-0">
-        <div className="text-sm font-semibold">{label}</div>
-        <div className="mt-0.5 text-sm" style={{ color: "var(--color-text-muted)" }}>
+        <div className="text-[13.5px] font-medium">{label}</div>
+        <div className="mt-0.5 truncate text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>
           {description}
         </div>
       </div>
-      <span
-        className="inline-flex justify-center rounded-full px-2.5 py-1 text-xs font-semibold"
-        style={{
-          backgroundColor: `color-mix(in srgb, var(--color-${tone}) 13%, white)`,
-          color: `var(--color-${tone})`
-        }}
-      >
+      <span className="justify-self-end text-[12.5px] font-semibold" style={{ color: `var(--color-${tone})` }}>
         {status}
       </span>
     </div>
@@ -62,19 +95,72 @@ function NotificationRow({ name, trigger, channel, status }) {
   const meta = channelStatus[status] || channelStatus.manual;
 
   return (
-    <div className="grid grid-cols-[1.2fr_1.4fr_150px_170px] items-center gap-3 border-b py-3 text-sm last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
-      <div className="font-semibold">{name}</div>
-      <div style={{ color: "var(--color-text-muted)" }}>{trigger}</div>
-      <div>{channel}</div>
-      <span
-        className="inline-flex justify-center rounded-full px-2.5 py-1 text-xs font-semibold"
-        style={{
-          backgroundColor: `color-mix(in srgb, var(--color-${meta.tone}) 13%, white)`,
-          color: `var(--color-${meta.tone})`
-        }}
-      >
+    <div className="grid grid-cols-[1.1fr_1.5fr_140px_150px] items-center gap-3 border-b py-3 text-[13px] last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+      <div className="font-medium">{name}</div>
+      <div className="truncate" style={{ color: "var(--color-text-muted)" }}>{trigger}</div>
+      <div style={{ color: "var(--color-text-muted)" }}>{channel}</div>
+      <span className="justify-self-end text-[12.5px] font-semibold" style={{ color: `var(--color-${meta.tone})` }}>
         {meta.label}
       </span>
+    </div>
+  );
+}
+
+function ThresholdRow({ label, unit, value }) {
+  return (
+    <div className="flex items-center justify-between border-b py-2.5 text-[13px] last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+      <span style={{ color: "var(--color-text-muted)" }}>{label}</span>
+      <span className="font-semibold tabular-nums">
+        {value} <span className="font-normal" style={{ color: "var(--color-text-muted)" }}>{unit}</span>
+      </span>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b py-2.5 text-[13px] last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+      <span style={{ color: "var(--color-text-muted)" }}>{label}</span>
+      <span className="text-right font-medium">{value}</span>
+    </div>
+  );
+}
+
+function SettingRow({ setting }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDescription = Boolean(setting.description);
+
+  return (
+    <div className="border-b py-2.5 text-[13px] last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+      <div className="grid grid-cols-[1fr_1.4fr_auto] items-center gap-3">
+        <div className="min-w-0">
+          <div className="font-medium">{setting.settingKey}</div>
+          {setting.group && (
+            <div className="text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>{setting.group}</div>
+          )}
+        </div>
+        <div className="min-w-0 truncate font-semibold">{String(setting.value)}</div>
+        <div className="flex items-center justify-end gap-3">
+          {setting.status && (
+            <span className="text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>{setting.status}</span>
+          )}
+          {hasDescription && (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="text-[11.5px] font-semibold underline-offset-2 hover:underline"
+              style={{ color: "var(--color-primary)" }}
+            >
+              {expanded ? "Nascondi" : "Dettagli"}
+            </button>
+          )}
+        </div>
+      </div>
+      {hasDescription && expanded && (
+        <div className="mt-1.5 text-[12.5px] leading-5" style={{ color: "var(--color-text-muted)" }}>
+          {setting.description}
+        </div>
+      )}
     </div>
   );
 }
@@ -204,144 +290,116 @@ export default function SettingsView({ config, data = {}, meta = {} }) {
     }
   ];
 
-  return (
-    <div className="mx-auto max-w-[1540px] space-y-5">
-      <section className="rounded-lg border bg-white px-5 py-4 shadow-soft" style={{ borderColor: "var(--color-border)" }}>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold">Console operativa</div>
-            <div className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
-              Stato backend, importazioni, regole e notifiche del pilota {config.company.name}.
-            </div>
-          </div>
-          <div
-            className="rounded-md border px-3 py-2 text-sm font-semibold"
-            style={{
-              borderColor: "var(--color-border)",
-              color: isLive ? "var(--color-success)" : "var(--color-warning)",
-              backgroundColor: "var(--color-muted)"
-            }}
-          >
-            {isLive ? "Ambiente live" : "Ambiente demo"}
-          </div>
-        </div>
-      </section>
+  const clientInfoRows = [
+    { label: "Prodotto", value: config.product.name },
+    { label: "Azienda", value: config.company.name },
+    { label: "Settore", value: config.company.sector },
+    { label: "Mailbox", value: monitoredMailbox },
+    { label: "Ultima attivita'", value: latestActivity ? formatDate(latestActivity) : "-" }
+  ];
 
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <StatBox label="Ultimo refresh dashboard" value={formatTime(lastUpdated)} icon={Clock3} tone="primary" />
-        <StatBox label="Ultima email importata" value={latestImport ? formatDate(latestImport) : "-"} icon={Mail} tone="primary" />
-        <StatBox label="Da verificare" value={reviewTotal} icon={AlertTriangle} tone={reviewTotal ? "danger" : "success"} />
-        <StatBox label="Importazioni in errore" value={errorImports} icon={errorImports ? XCircle : ShieldCheck} tone={errorTone} />
+  return (
+    <div className="mx-auto max-w-[1100px] space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-[18px] font-semibold" style={{ color: "var(--color-text)" }}>
+            Impostazioni
+          </h1>
+          <p className="mt-0.5 text-[13px]" style={{ color: "var(--color-text-muted)" }}>
+            Stato del sistema, importazioni e configurazione del pilota {config.company.name}.
+          </p>
+        </div>
+        <span
+          className="inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold"
+          style={{ borderColor: "var(--color-border)", color: isLive ? "var(--color-success)" : "var(--color-warning)" }}
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: `var(--color-${isLive ? "success" : "warning"})` }} />
+          {isLive ? "Ambiente live" : "Ambiente demo"}
+        </span>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
-        <Card title="Stato sistema">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border bg-white px-5 py-3" style={{ borderColor: "var(--color-border)" }}>
+        <StatInline label="Ultimo refresh" value={formatTime(lastUpdated)} tone="text" />
+        <StatInline label="Ultima email importata" value={latestImport ? formatDate(latestImport) : "-"} tone="text" />
+        <StatInline label="Da verificare" value={reviewTotal} tone={reviewTotal ? "danger" : "success"} />
+        <StatInline label="Importazioni in errore" value={errorImports} tone={errorTone} />
+      </div>
+
+      <div className="divide-y rounded-lg border bg-white" style={{ borderColor: "var(--color-border)" }}>
+        <Section title="Stato sistema" defaultOpen>
           <div>
             {healthRows.map((row) => (
               <HealthRow key={row.label} {...row} />
             ))}
           </div>
-        </Card>
+        </Section>
 
-        <Card title="Importazioni">
-          <div className="grid grid-cols-3 gap-3">
-            <StatBox label="Completate" value={doneImports} icon={CheckCircle2} tone="success" />
-            <StatBox label="In lavorazione" value={processingImports} icon={Clock3} tone={processingImports ? "warning" : "text"} />
-            <StatBox label="Errori" value={errorImports} icon={XCircle} tone={errorTone} />
+        <Section
+          title="Importazioni"
+          defaultOpen
+          hint={`${doneImports} completate · ${processingImports} in lavorazione · ${errorImports} errori`}
+        >
+          <div className="rounded-md p-3 text-[12.5px]" style={{ backgroundColor: "var(--color-muted)" }}>
+            <span className="font-semibold">Regola anti-duplicati. </span>
+            <span style={{ color: "var(--color-text-muted)" }}>
+              Ogni email viene controllata tramite Message ID prima di essere processata: se e' gia' presente, Make ferma il flusso.
+            </span>
           </div>
-          <div className="mt-4 rounded-md border p-3 text-sm" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)" }}>
-            <div className="font-semibold">Regola anti-duplicati</div>
-            <div className="mt-1" style={{ color: "var(--color-text-muted)" }}>
-              Ogni email viene controllata tramite Message ID prima di essere processata. Se e' gia' presente, Make ferma il flusso.
-            </div>
-          </div>
-        </Card>
-      </div>
+        </Section>
 
-      <Card title="Notifiche e automazioni">
-        <div>
-          {notificationRules.map((rule) => (
-            <NotificationRow key={rule.name} {...rule} />
-          ))}
-        </div>
-      </Card>
-
-      <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <Card title="Soglie operative">
-          <div className="grid grid-cols-5 gap-3 text-sm">
-            {Object.entries(alertRules).map(([key, value]) => (
-              <div key={key} className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
-                <div style={{ color: "var(--color-text-muted)" }}>{key}</div>
-                <div className="mt-1 text-xl font-semibold">{value}</div>
-              </div>
+        <Section title="Notifiche e automazioni" hint={`${notificationRules.length} regole`}>
+          <div>
+            {notificationRules.map((rule) => (
+              <NotificationRow key={rule.name} {...rule} />
             ))}
           </div>
-        </Card>
+        </Section>
 
-        <Card title="Configurazione cliente">
-          <dl className="grid grid-cols-[170px_1fr] gap-x-4 gap-y-3 text-sm">
-            <dt style={{ color: "var(--color-text-muted)" }}>Prodotto</dt>
-            <dd className="font-medium">{config.product.name}</dd>
-            <dt style={{ color: "var(--color-text-muted)" }}>Azienda</dt>
-            <dd className="font-medium">{config.company.name}</dd>
-            <dt style={{ color: "var(--color-text-muted)" }}>Settore</dt>
-            <dd className="font-medium">{config.company.sector}</dd>
-            <dt style={{ color: "var(--color-text-muted)" }}>Mailbox</dt>
-            <dd className="font-medium">{monitoredMailbox}</dd>
-            <dt style={{ color: "var(--color-text-muted)" }}>Ultima attivita'</dt>
-            <dd className="font-medium">{latestActivity ? formatDate(latestActivity) : "-"}</dd>
-          </dl>
-        </Card>
+        <Section title="Soglie operative">
+          <div>
+            {Object.entries(alertRules).map(([key, value]) => {
+              const meta = thresholdLabels[key] || { label: key, unit: "" };
+              return <ThresholdRow key={key} label={meta.label} unit={meta.unit} value={value} />;
+            })}
+          </div>
+        </Section>
+
+        <Section title="Configurazione cliente">
+          <div>
+            {clientInfoRows.map((row) => (
+              <InfoRow key={row.label} label={row.label} value={row.value} />
+            ))}
+          </div>
+        </Section>
+
+        <Section title="Settings da Airtable" hint={`${customerVisibleSettings.length} visibili`}>
+          <div>
+            {customerVisibleSettings.map((setting) => (
+              <SettingRow key={setting.id} setting={setting} />
+            ))}
+            {!customerVisibleSettings.length && (
+              <div className="py-4 text-center text-[13px]" style={{ color: "var(--color-text-muted)" }}>
+                Nessuna impostazione visibile.
+              </div>
+            )}
+          </div>
+        </Section>
+
+        <Section title="Moduli attivi" hint={`${activeModules.length} attivi`}>
+          <div className="flex flex-wrap gap-2">
+            {activeModules.map(([module]) => (
+              <span
+                key={module}
+                className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12.5px] font-medium"
+                style={{ borderColor: "var(--color-border)" }}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: "var(--color-primary)" }} />
+                {module}
+              </span>
+            ))}
+          </div>
+        </Section>
       </div>
-
-      <Card title="Settings da Airtable">
-        <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--color-border)" }}>
-          <table className="min-w-full border-collapse bg-white text-sm">
-            <thead style={{ backgroundColor: "var(--color-muted)" }}>
-              <tr>
-                {["Gruppo", "Chiave", "Valore", "Stato", "Descrizione"].map((label) => (
-                  <th key={label} className="border-b px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
-                    {label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {customerVisibleSettings.map((setting, index) => (
-                <tr key={setting.id} style={{ backgroundColor: index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)" }}>
-                  <td className="border-b px-3 py-3 font-medium" style={{ borderColor: "var(--color-border)" }}>{setting.group || "-"}</td>
-                  <td className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>{setting.settingKey}</td>
-                  <td className="border-b px-3 py-3 font-semibold" style={{ borderColor: "var(--color-border)" }}>{setting.value}</td>
-                  <td className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>{setting.status || "-"}</td>
-                  <td className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>{setting.description || "-"}</td>
-                </tr>
-              ))}
-              {!customerVisibleSettings.length && (
-                <tr>
-                  <td className="px-3 py-6 text-center" colSpan={5} style={{ color: "var(--color-text-muted)" }}>
-                    Nessuna impostazione visibile.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      <Card title="Moduli attivi">
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
-          {activeModules.map(([module]) => (
-            <div
-              key={module}
-              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-medium"
-              style={{ borderColor: "var(--color-border)" }}
-            >
-              <SlidersHorizontal className="h-4 w-4" style={{ color: "var(--color-primary)" }} />
-              {module}
-            </div>
-          ))}
-        </div>
-      </Card>
     </div>
   );
 }
