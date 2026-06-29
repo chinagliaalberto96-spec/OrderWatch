@@ -215,6 +215,10 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     async getSettings() {
       return mapRecords("settings", await request(tables.settings));
     },
+    async updateSetting(recordId, fields) {
+      const updated = await updateRecord(tables.settings, recordId, toAirtableFields("settings", fields));
+      return mapRecords("settings", { records: [updated] })[0];
+    },
     async updateOrder(recordId, fields) {
       return updateRecord(tables.orders, recordId, toAirtableFields("orders", fields));
     },

@@ -150,6 +150,25 @@ export default function App() {
     setActiveView("dashboard");
   }
 
+  async function handleUpdateSetting(settingId, fields) {
+    const result = await adapter.updateSetting(settingId, fields);
+    const updatedSetting = result.setting || result;
+
+    setData((currentData) => {
+      if (!currentData) return currentData;
+
+      return {
+        ...currentData,
+        settings: (currentData.settings || []).map((setting) =>
+          setting.id === updatedSetting.id ? { ...setting, ...updatedSetting } : setting
+        )
+      };
+    });
+
+    setLastUpdated(new Date());
+    return updatedSetting;
+  }
+
   if (!sessionUser) {
     return (
       <div style={loginThemeStyle}>
@@ -206,6 +225,7 @@ export default function App() {
             <SettingsView
               config={config}
               data={data}
+              onUpdateSetting={handleUpdateSetting}
               meta={{
                 mode: USES_MOCK_DATA ? "mock" : "live",
                 lastUpdated,

@@ -3,10 +3,13 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Check,
   Database,
+  Pencil,
   Mail,
   SlidersHorizontal,
-  Workflow
+  Workflow,
+  X
 } from "lucide-react";
 import { useState } from "react";
 import { formatDate } from "../utils/dateUtils";
@@ -126,9 +129,46 @@ function InfoRow({ label, value }) {
   );
 }
 
-function SettingRow({ setting }) {
+function SettingRow({ setting, onUpdateSetting }) {
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    value: String(setting.value ?? ""),
+    status: setting.status || "Active",
+    description: setting.description || ""
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const hasDescription = Boolean(setting.description);
+  const editable = setting.customerVisible !== "No" && Boolean(onUpdateSetting);
+
+  function resetDraft() {
+    setDraft({
+      value: String(setting.value ?? ""),
+      status: setting.status || "Active",
+      description: setting.description || ""
+    });
+    setError("");
+    setEditing(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError("");
+
+    try {
+      await onUpdateSetting(setting.id, {
+        value: draft.value,
+        status: draft.status,
+        description: draft.description
+      });
+      setEditing(false);
+    } catch (err) {
+      setError(err.message || "Impossibile salvare.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="border-b py-2.5 text-[13px] last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
@@ -139,12 +179,48 @@ function SettingRow({ setting }) {
             <div className="text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>{setting.group}</div>
           )}
         </div>
-        <div className="min-w-0 truncate font-semibold">{String(setting.value)}</div>
-        <div className="flex items-center justify-end gap-3">
-          {setting.status && (
-            <span className="text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>{setting.status}</span>
+        <div className="min-w-0">
+          {editing ? (
+            setting.type === "boolean" ? (
+              <select
+                value={draft.value}
+                onChange={(event) => setDraft((value) => ({ ...value, value: event.target.value }))}
+                className="w-full rounded-md border px-2 py-1.5 text-[13px] outline-none"
+                style={{ borderColor: "var(--color-border)" }}
+              >
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+            ) : (
+              <input
+                value={draft.value}
+                type={setting.type === "number" ? "number" : "text"}
+                onChange={(event) => setDraft((value) => ({ ...value, value: event.target.value }))}
+                className="w-full rounded-md border px-2 py-1.5 text-[13px] outline-none"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+            )
+          ) : (
+            <div className="truncate font-semibold">{String(setting.value)}</div>
           )}
-          {hasDescription && (
+        </div>
+        <div className="flex items-center justify-end gap-3">
+          {editing ? (
+            <select
+              value={draft.status}
+              onChange={(event) => setDraft((value) => ({ ...value, status: event.target.value }))}
+              className="rounded-md border px-2 py-1.5 text-[12px] outline-none"
+              style={{ borderColor: "var(--color-border)" }}
+            >
+              <option value="Active">Active</option>
+              <option value="Planned">Planned</option>
+              <option value="Manual">Manual</option>
+              <option value="Disabled">Disabled</option>
+            </select>
+          ) : setting.status ? (
+            <span className="text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>{setting.status}</span>
+          ) : null}
+          {!editing && hasDescription && (
             <button
               type="button"
               onClick={() => setExpanded((value) => !value)}
@@ -154,8 +230,58 @@ function SettingRow({ setting }) {
               {expanded ? "Nascondi" : "Dettagli"}
             </button>
           )}
+          {!editing && editable && (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="inline-flex items-center gap-1 text-[11.5px] font-semibold underline-offset-2 hover:underline"
+              style={{ color: "var(--color-primary)" }}
+            >
+              <Pencil className="h-3 w-3" />
+              Modifica
+            </button>
+          )}
+          {editing && (
+            <span className="inline-flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-semibold disabled:opacity-60"
+                style={{ backgroundColor: "var(--color-primary)", color: "white" }}
+              >
+                <Check className="h-3.5 w-3.5" />
+                {saving ? "Salvo" : "Salva"}
+              </button>
+              <button
+                type="button"
+                onClick={resetDraft}
+                disabled={saving}
+                className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[12px] font-semibold disabled:opacity-60"
+                style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          )}
         </div>
       </div>
+      {editing && (
+        <div className="mt-2">
+          <textarea
+            value={draft.description}
+            onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))}
+            rows={2}
+            className="w-full resize-none rounded-md border px-2 py-1.5 text-[12.5px] outline-none"
+            style={{ borderColor: "var(--color-border)" }}
+          />
+        </div>
+      )}
+      {error && (
+        <div className="mt-1.5 text-[12px]" style={{ color: "var(--color-danger)" }}>
+          {error}
+        </div>
+      )}
       {hasDescription && expanded && (
         <div className="mt-1.5 text-[12.5px] leading-5" style={{ color: "var(--color-text-muted)" }}>
           {setting.description}
@@ -189,7 +315,7 @@ function parseSettingValue(setting) {
   return setting.value;
 }
 
-export default function SettingsView({ config, data = {}, meta = {} }) {
+export default function SettingsView({ config, data = {}, meta = {}, onUpdateSetting }) {
   const activeModules = Object.entries(config.modules).filter(([, active]) => active);
   const { mode, lastUpdated, counts = {} } = meta;
   const processedEmails = data.processedEmails || [];
@@ -375,7 +501,7 @@ export default function SettingsView({ config, data = {}, meta = {} }) {
         <Section title="Settings da Airtable" hint={`${customerVisibleSettings.length} visibili`}>
           <div>
             {customerVisibleSettings.map((setting) => (
-              <SettingRow key={setting.id} setting={setting} />
+              <SettingRow key={setting.id} setting={setting} onUpdateSetting={onUpdateSetting} />
             ))}
             {!customerVisibleSettings.length && (
               <div className="py-4 text-center text-[13px]" style={{ color: "var(--color-text-muted)" }}>
