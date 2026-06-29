@@ -12,6 +12,8 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     suppliers: tableNames.suppliers || "Suppliers",
     documents: tableNames.documents || "Documents",
     activities: tableNames.activities || "Activities",
+    reminders: tableNames.reminders || "Reminders",
+    dailyReports: tableNames.dailyReports || "Daily Reports",
     processedEmails: tableNames.processedEmails || "Processed Emails",
     settings: tableNames.settings || "Settings"
   };
@@ -69,6 +71,28 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
       Detail: "detail",
       "Order Code": "orderCode",
       Date: "date"
+    },
+    reminders: {
+      "Order Code": "orderCode",
+      "Supplier Name": "supplierName",
+      "Sent To": "sentTo",
+      Type: "type",
+      Status: "status",
+      "Sent At": "sentAt",
+      Body: "body"
+    },
+    dailyReports: {
+      "Report ID": "reportId",
+      "Report Date": "reportDate",
+      "Recipient Name": "recipientName",
+      "Recipient Email": "recipientEmail",
+      "Critical Orders Count": "criticalOrdersCount",
+      Status: "status",
+      Channel: "channel",
+      Subject: "subject",
+      Body: "body",
+      "Sent At": "sentAt",
+      "Error Detail": "errorDetail"
     },
     processedEmails: {
       "Message ID": "messageId",
@@ -183,16 +207,18 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
 
   return {
     async getDashboardData() {
-      const [orders, projects, suppliers, documents, activities, processedEmails, settings] = await Promise.all([
+      const [orders, projects, suppliers, documents, activities, reminders, dailyReports, processedEmails, settings] = await Promise.all([
         this.getOrders(),
         this.getProjects(),
         this.getSuppliers(),
         this.getDocuments(),
         this.getActivities(),
+        this.getReminders(),
+        this.getDailyReports(),
         this.getProcessedEmails(),
         this.getSettings()
       ]);
-      return { orders, projects, suppliers, documents, activities, processedEmails, settings };
+      return { orders, projects, suppliers, documents, activities, reminders, dailyReports, processedEmails, settings };
     },
     async getOrders() {
       return mapRecords("orders", await request(tables.orders));
@@ -208,6 +234,12 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     },
     async getActivities() {
       return mapRecords("activities", await request(tables.activities));
+    },
+    async getReminders() {
+      return mapRecords("reminders", await request(tables.reminders));
+    },
+    async getDailyReports() {
+      return mapRecords("dailyReports", await request(tables.dailyReports));
     },
     async getProcessedEmails() {
       return mapRecords("processedEmails", await request(tables.processedEmails));

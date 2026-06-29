@@ -11,6 +11,7 @@ import DashboardView from "./views/DashboardView";
 import DocumentsView from "./views/DocumentsView";
 import ImportsView from "./views/ImportsView";
 import LoginView from "./views/LoginView";
+import NotificationsView from "./views/NotificationsView";
 import OrdersView from "./views/OrdersView";
 import ProjectsView from "./views/ProjectsView";
 import SettingsView from "./views/SettingsView";
@@ -23,6 +24,7 @@ const viewLabels = (terminology) => ({
   suppliers: terminology.suppliersPlural,
   documents: terminology.documentsPlural,
   imports: terminology.importsPlural || "Importazioni",
+  reminders: "Notifiche",
   settings: "Impostazioni"
 });
 
@@ -57,7 +59,7 @@ export default function App() {
 
   const navItems = useMemo(
     () =>
-      ["dashboard", "orders", "projects", "suppliers", "documents", "imports", "settings"]
+      ["dashboard", "orders", "projects", "suppliers", "documents", "imports", "reminders", "settings"]
         .filter((key) => config.modules[key])
         .map((key) => ({ key, label: labels[key] })),
     [config.modules, labels]
@@ -118,7 +120,23 @@ export default function App() {
         view: "documents"
       }));
 
-    return [...orderItems, ...documentItems];
+    const reminderItems = (data.reminders || [])
+      .filter((reminder) => ["draft", "failed"].includes(reminder.status))
+      .map((reminder) => ({
+        id: `reminder-${reminder.id}`,
+        label: `${reminder.status === "failed" ? "Sollecito fallito" : "Bozza sollecito"} ${reminder.orderCode || ""} (${reminder.supplierName || "fornitore"})`,
+        view: "reminders"
+      }));
+
+    const importItems = (data.processedEmails || [])
+      .filter((email) => email.status === "Error" || email.status?.trim() === "Processing")
+      .map((email) => ({
+        id: `import-${email.id}`,
+        label: `${email.status === "Error" ? "Errore importazione" : "Importazione in lavorazione"}: ${email.subject || email.messageId || "email"}`,
+        view: "imports"
+      }));
+
+    return [...orderItems, ...documentItems, ...reminderItems, ...importItems];
   }, [data]);
 
   const filteredData = useMemo(() => {
@@ -129,7 +147,8 @@ export default function App() {
       projects: filterRows(data.projects, searchQuery),
       suppliers: filterRows(data.suppliers, searchQuery),
       documents: filterRows(data.documents, searchQuery),
-      processedEmails: filterRows(data.processedEmails || [], searchQuery)
+      processedEmails: filterRows(data.processedEmails || [], searchQuery),
+      reminders: filterRows(data.reminders || [], searchQuery)
     };
   }, [data, searchQuery]);
 
@@ -221,6 +240,7 @@ export default function App() {
           {activeView === "suppliers" && <SuppliersView config={config} suppliers={filteredData.suppliers} />}
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
           {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} />}
+          {activeView === "reminders" && <NotificationsView config={config} data={filteredData} />}
           {activeView === "settings" && (
             <SettingsView
               config={config}

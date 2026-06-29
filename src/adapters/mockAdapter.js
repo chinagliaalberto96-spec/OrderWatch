@@ -5,6 +5,19 @@ import { mockProjects } from "../data/mockProjects";
 import { mockSuppliers } from "../data/mockSuppliers";
 
 const mockProcessedEmails = [];
+const mockReminders = [
+  {
+    id: "reminder-demo-1",
+    orderCode: "GCG-001",
+    supplierName: "Fornitore Demo",
+    sentTo: "buyer@graphiccentergroup.it",
+    type: "draft",
+    status: "draft",
+    sentAt: null,
+    body: "Bozza sollecito fornitore pronta per revisione."
+  }
+];
+const mockDailyReports = [];
 const mockSettings = [
   {
     id: "set-client-mailbox",
@@ -46,6 +59,8 @@ export const mockAdapter = {
       suppliers: mockSuppliers,
       documents: mockDocuments,
       activities: mockActivities,
+      reminders: mockReminders,
+      dailyReports: mockDailyReports,
       processedEmails: mockProcessedEmails,
       settings: mockSettings
     };
@@ -64,6 +79,12 @@ export const mockAdapter = {
   },
   async getActivities() {
     return mockActivities;
+  },
+  async getReminders() {
+    return mockReminders;
+  },
+  async getDailyReports() {
+    return mockDailyReports;
   },
   async getProcessedEmails() {
     return mockProcessedEmails;

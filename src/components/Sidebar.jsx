@@ -1,4 +1,4 @@
-import { BarChart3, Boxes, FileText, Inbox, LayoutDashboard, Settings, Truck } from "lucide-react";
+import { BarChart3, Bell, Boxes, FileText, Inbox, LayoutDashboard, Settings, Truck } from "lucide-react";
 import OrderWatchMark, { SIDEBAR_INK } from "./OrderWatchMark";
 
 // Sidebar v3 (giugno 2026): identita' sempre OrderWatch (nessun nome/colore
@@ -14,6 +14,7 @@ const icons = {
   suppliers: Truck,
   documents: FileText,
   imports: Inbox,
+  reminders: Bell,
   settings: Settings
 };
 
