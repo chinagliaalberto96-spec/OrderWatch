@@ -90,7 +90,7 @@ export default function LoginView({ config, onLogin }) {
         <aside className="flex min-w-0 justify-center lg:justify-start">
           <form className="w-full max-w-[560px] rounded-[32px] border bg-white px-8 py-10 shadow-[0_22px_70px_rgba(17,24,39,0.10)] sm:px-10 lg:px-12 lg:py-12" style={{ borderColor: "var(--color-border)" }} onSubmit={handleSubmit}>
             <div className="flex flex-col items-center text-center">
-              <OrderWatchMark variant="full" size="lg" />
+              <OrderWatchMark size="lg" />
 
               <div className="mt-5 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13px] font-semibold" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 24%, white)", backgroundColor: "color-mix(in srgb, var(--color-accent) 8%, white)", color: "var(--color-accent)" }}>
                 <ShieldCheck className="h-3.5 w-3.5" />
