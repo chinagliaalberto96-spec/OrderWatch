@@ -12,7 +12,8 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     suppliers: tableNames.suppliers || "Suppliers",
     documents: tableNames.documents || "Documents",
     activities: tableNames.activities || "Activities",
-    processedEmails: tableNames.processedEmails || "Processed Emails"
+    processedEmails: tableNames.processedEmails || "Processed Emails",
+    settings: tableNames.settings || "Settings"
   };
 
   const fieldMaps = {
@@ -82,6 +83,15 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
       "Error Detail": "errorDetail",
       "Pre-Classification": "preClassification",
       "Final Classification": "finalClassification"
+    },
+    settings: {
+      "Setting Key": "settingKey",
+      Value: "value",
+      Type: "type",
+      Description: "description",
+      Group: "group",
+      Status: "status",
+      "Customer Visible": "customerVisible"
     }
   };
 
@@ -173,15 +183,16 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
 
   return {
     async getDashboardData() {
-      const [orders, projects, suppliers, documents, activities, processedEmails] = await Promise.all([
+      const [orders, projects, suppliers, documents, activities, processedEmails, settings] = await Promise.all([
         this.getOrders(),
         this.getProjects(),
         this.getSuppliers(),
         this.getDocuments(),
         this.getActivities(),
-        this.getProcessedEmails()
+        this.getProcessedEmails(),
+        this.getSettings()
       ]);
-      return { orders, projects, suppliers, documents, activities, processedEmails };
+      return { orders, projects, suppliers, documents, activities, processedEmails, settings };
     },
     async getOrders() {
       return mapRecords("orders", await request(tables.orders));
@@ -200,6 +211,9 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
     },
     async getProcessedEmails() {
       return mapRecords("processedEmails", await request(tables.processedEmails));
+    },
+    async getSettings() {
+      return mapRecords("settings", await request(tables.settings));
     },
     async updateOrder(recordId, fields) {
       return updateRecord(tables.orders, recordId, toAirtableFields("orders", fields));

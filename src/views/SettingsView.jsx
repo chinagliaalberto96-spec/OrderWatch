@@ -93,10 +93,22 @@ function getLatestDate(rows = [], key) {
   return new Date(Math.max(...timestamps));
 }
 
+function parseSettingValue(setting) {
+  if (!setting) return null;
+  if (setting.type === "number") {
+    const value = Number(setting.value);
+    return Number.isFinite(value) ? value : null;
+  }
+  if (setting.type === "boolean") return setting.value === true || setting.value === "true";
+  return setting.value;
+}
+
 export default function SettingsView({ config, data = {}, meta = {} }) {
   const activeModules = Object.entries(config.modules).filter(([, active]) => active);
   const { mode, lastUpdated, counts = {} } = meta;
   const processedEmails = data.processedEmails || [];
+  const settings = data.settings || [];
+  const settingsByKey = Object.fromEntries(settings.map((setting) => [setting.settingKey, setting]));
   const orders = data.orders || [];
   const documents = data.documents || [];
   const latestImport = getLatestDate(processedEmails, "receivedAt");
@@ -107,7 +119,17 @@ export default function SettingsView({ config, data = {}, meta = {} }) {
   const reviewDocuments = documents.filter((document) => document.needsHumanReview).length;
   const lowConfidenceOrders = orders.filter((order) => Number(order.aiConfidence || 1) < 0.7 || order.needsReview).length;
   const reviewTotal = counts.review ?? reviewDocuments + lowConfidenceOrders;
-  const monitoredMailbox = "Da collegare: mailbox Graphic Center";
+  const monitoredMailbox = parseSettingValue(settingsByKey["client.monitored_mailbox"]) || "Da collegare: mailbox Graphic Center";
+  const alertRules = {
+    warningDays: parseSettingValue(settingsByKey["alerts.warning_days"]) ?? config.alertRules.warningDays,
+    criticalDays: parseSettingValue(settingsByKey["alerts.critical_days"]) ?? config.alertRules.criticalDays,
+    overdueDays: parseSettingValue(settingsByKey["alerts.overdue_days"]) ?? config.alertRules.overdueDays,
+    reminderDaysBeforeDue:
+      parseSettingValue(settingsByKey["notifications.supplier_reminder_days_before_due"]) ?? config.alertRules.reminderDaysBeforeDue,
+    escalationDaysBeforeDue:
+      parseSettingValue(settingsByKey["notifications.escalation_days_before_due"]) ?? config.alertRules.escalationDaysBeforeDue
+  };
+  const customerVisibleSettings = settings.filter((setting) => setting.customerVisible !== "No");
   const isLive = mode !== "mock";
   const errorTone = errorImports ? "danger" : "success";
 
@@ -152,19 +174,19 @@ export default function SettingsView({ config, data = {}, meta = {} }) {
   const notificationRules = [
     {
       name: "Ordine critico",
-      trigger: `Mancano ${config.alertRules.criticalDays} giorni o meno alla scadenza`,
+      trigger: `Mancano ${alertRules.criticalDays} giorni o meno alla scadenza`,
       channel: "Dashboard",
       status: "active"
     },
     {
       name: "Sollecito fornitore",
-      trigger: `${config.alertRules.reminderDaysBeforeDue} giorni prima della scadenza`,
+      trigger: `${alertRules.reminderDaysBeforeDue} giorni prima della scadenza`,
       channel: "Email/Make",
       status: "planned"
     },
     {
       name: "Escalation interna",
-      trigger: `${config.alertRules.escalationDaysBeforeDue} giorno prima della scadenza`,
+      trigger: `${alertRules.escalationDaysBeforeDue} giorno prima della scadenza`,
       channel: "Email responsabile",
       status: "planned"
     },
@@ -247,7 +269,7 @@ export default function SettingsView({ config, data = {}, meta = {} }) {
       <div className="grid gap-4 xl:grid-cols-[1fr_1fr]">
         <Card title="Soglie operative">
           <div className="grid grid-cols-5 gap-3 text-sm">
-            {Object.entries(config.alertRules).map(([key, value]) => (
+            {Object.entries(alertRules).map(([key, value]) => (
               <div key={key} className="rounded-md border p-3" style={{ borderColor: "var(--color-border)" }}>
                 <div style={{ color: "var(--color-text-muted)" }}>{key}</div>
                 <div className="mt-1 text-xl font-semibold">{value}</div>
@@ -271,6 +293,40 @@ export default function SettingsView({ config, data = {}, meta = {} }) {
           </dl>
         </Card>
       </div>
+
+      <Card title="Settings da Airtable">
+        <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--color-border)" }}>
+          <table className="min-w-full border-collapse bg-white text-sm">
+            <thead style={{ backgroundColor: "var(--color-muted)" }}>
+              <tr>
+                {["Gruppo", "Chiave", "Valore", "Stato", "Descrizione"].map((label) => (
+                  <th key={label} className="border-b px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {customerVisibleSettings.map((setting, index) => (
+                <tr key={setting.id} style={{ backgroundColor: index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)" }}>
+                  <td className="border-b px-3 py-3 font-medium" style={{ borderColor: "var(--color-border)" }}>{setting.group || "-"}</td>
+                  <td className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>{setting.settingKey}</td>
+                  <td className="border-b px-3 py-3 font-semibold" style={{ borderColor: "var(--color-border)" }}>{setting.value}</td>
+                  <td className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)" }}>{setting.status || "-"}</td>
+                  <td className="border-b px-3 py-3" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>{setting.description || "-"}</td>
+                </tr>
+              ))}
+              {!customerVisibleSettings.length && (
+                <tr>
+                  <td className="px-3 py-6 text-center" colSpan={5} style={{ color: "var(--color-text-muted)" }}>
+                    Nessuna impostazione visibile.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
 
       <Card title="Moduli attivi">
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
