@@ -188,7 +188,7 @@ export default function SuppliersView({
             key={supplier.id}
             type="button"
             onClick={() => setSelectedId(supplier.id)}
-            className="grid w-full grid-cols-[1fr_auto] items-center gap-4 px-4 py-4 text-left transition-colors hover:bg-[color:var(--color-muted)] md:grid-cols-[minmax(240px,1.5fr)_120px_150px_140px_32px]"
+            className="grid w-full grid-cols-[1fr_auto] items-center gap-4 px-4 py-2.5 text-left transition-colors hover:bg-[color:var(--color-muted)] md:grid-cols-[minmax(240px,1.5fr)_120px_150px_140px_32px]"
           >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -196,9 +196,11 @@ export default function SuppliersView({
                 {supplier.registryStatus === "candidate" && <RegistryBadge>Da verificare</RegistryBadge>}
                 {supplier.criticalCount > 0 && <RegistryBadge tone="danger">{supplier.criticalCount} criticita</RegistryBadge>}
               </div>
-              <div className="mt-1 truncate text-sm" style={{ color: "var(--color-text-muted)" }}>
-                {supplier.email || "Nessuna email principale"}
-              </div>
+              {supplier.email && (
+                <div className="mt-0.5 truncate text-[13px]" style={{ color: "var(--color-text-muted)" }}>
+                  {supplier.email}
+                </div>
+              )}
             </div>
             <Metric value={supplier.openOrderCount} empty="Nessuno" />
             <Metric value={supplier.materialCount} empty="Nessuno" />
