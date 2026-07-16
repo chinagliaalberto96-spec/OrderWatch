@@ -10,7 +10,15 @@ export const statusLabels = {
   WARNING: "Attenzione",
   OK: "In corso",
   TO_VERIFY: "Da verificare",
-  CLOSED: "Concluso"
+  CLOSED: "Concluso",
+  // Stati lavoro (Lavori/Projects): salvati in italiano direttamente sul
+  // record, non fanno parte del sistema di alert ordini sopra. Servono solo
+  // perche' StatusBadge sappia associare loro un tono leggibile (altrimenti
+  // ricadevano tutti sul fallback "muted", quasi invisibile).
+  PROJECT_QUOTE: "Preventivo",
+  PROJECT_OPEN: "Aperto",
+  PROJECT_PRODUCTION: "In produzione",
+  PROJECT_CANCELLED: "Annullato"
 };
 
 export function getOrderStatus(order, alertRules) {
@@ -31,6 +39,10 @@ export function getStatusTone(status) {
     WARNING: "warning",
     OK: "success",
     TO_VERIFY: "muted",
-    CLOSED: "muted"
+    CLOSED: "muted",
+    PROJECT_QUOTE: "warning",
+    PROJECT_OPEN: "success",
+    PROJECT_PRODUCTION: "primary",
+    PROJECT_CANCELLED: "danger"
   }[status] || "muted";
 }

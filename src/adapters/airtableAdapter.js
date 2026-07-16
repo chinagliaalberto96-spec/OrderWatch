@@ -218,7 +218,7 @@ export function createAirtableAdapter({ baseId, apiKey, tableNames = {} }) {
         this.getProcessedEmails(),
         this.getSettings()
       ]);
-      return { orders, projects, suppliers, documents, activities, reminders, dailyReports, processedEmails, settings };
+      return { orders, projects, suppliers, documents, activities, reminders, materialLines: [], dailyReports, processedEmails, settings };
     },
     async getOrders() {
       return mapRecords("orders", await request(tables.orders));

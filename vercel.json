@@ -1,0 +1,19 @@
+{
+  "rewrites": [
+    { "source": "/api/settings", "destination": "/api/admin?route=settings" },
+    { "source": "/api/app-users", "destination": "/api/admin?route=app-users" },
+    { "source": "/api/report-recipients", "destination": "/api/admin?route=report-recipients" },
+    { "source": "/api/contacts", "destination": "/api/app?route=contacts" },
+    { "source": "/api/contract-billing-items", "destination": "/api/app?route=contract-billing-items" },
+    { "source": "/api/contract-progress-reports", "destination": "/api/app?route=contract-progress-reports" },
+    { "source": "/api/contract-projects", "destination": "/api/app?route=contract-projects" },
+    { "source": "/api/customer-confirmations", "destination": "/api/app?route=customer-confirmations" },
+    { "source": "/api/mailboxes", "destination": "/api/app?route=mailboxes" },
+    { "source": "/api/operational-actions", "destination": "/api/app?route=operational-actions" },
+    { "source": "/api/orders", "destination": "/api/app?route=orders" },
+    { "source": "/api/projects", "destination": "/api/app?route=projects" },
+    { "source": "/api/receiving", "destination": "/api/app?route=receiving" },
+    { "source": "/api/supplier-orders", "destination": "/api/app?route=supplier-orders" },
+    { "source": "/api/suppliers", "destination": "/api/app?route=suppliers" }
+  ]
+}

@@ -4,7 +4,7 @@ export default function DataTable({ columns, rows, renderCell, onRowClick }) {
   if (!rows?.length) return <EmptyState />;
 
   return (
-    <div className="overflow-hidden rounded-lg border" style={{ borderColor: "var(--color-border)" }}>
+    <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--color-border)" }}>
       <table className="min-w-full border-collapse bg-white text-sm">
         <thead style={{ backgroundColor: "var(--color-muted)" }}>
           <tr>

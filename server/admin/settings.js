@@ -1,6 +1,9 @@
-import { createAirtableAdapter } from "../src/adapters/airtableAdapter.js";
+import { createDataAdapter } from "../lib/_dataSource.js";
+import { authorizeApiRequest } from "../lib/_auth.js";
+import { WORKFLOW_MODE_VALUES } from "../../src/config/workflowModes.js";
 
 const editableStatuses = new Set(["Active", "Planned", "Manual", "Disabled"]);
+const traceabilityModes = new Set(WORKFLOW_MODE_VALUES);
 
 function normalizeValueByType(value, type) {
   if (type === "number") {
@@ -21,6 +24,8 @@ function normalizeValueByType(value, type) {
 }
 
 export default async function handler(request, response) {
+  const user = await authorizeApiRequest(request, response, { roles: ["Owner", "IT", "Admin"] });
+  if (!user) return;
   if (request.method !== "PATCH") {
     response.setHeader("Allow", "PATCH");
     response.status(405).json({ error: "Method not allowed" });
@@ -28,10 +33,7 @@ export default async function handler(request, response) {
   }
 
   try {
-    const adapter = createAirtableAdapter({
-      baseId: process.env.AIRTABLE_BASE_ID,
-      apiKey: process.env.AIRTABLE_API_KEY
-    });
+    const adapter = createDataAdapter(request.query?.source || request.body?.source, user.organizationId);
 
     const { id, value, status, description } = request.body || {};
 
@@ -57,6 +59,10 @@ export default async function handler(request, response) {
 
     if ("value" in request.body) {
       fields.value = normalizeValueByType(value, setting.type);
+      if (setting.settingKey === "workflow.traceability_mode" && !traceabilityModes.has(fields.value)) {
+        response.status(400).json({ error: "Invalid traceability mode." });
+        return;
+      }
     }
 
     if ("status" in request.body) {

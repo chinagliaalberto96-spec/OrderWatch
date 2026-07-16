@@ -5,12 +5,17 @@ import OrderWatchMark from "../components/OrderWatchMark";
 
 const HERO_INK = "#141820";
 
-export default function LoginView({ config, onLogin }) {
+export default function LoginView({ config, authMode = "legacy", onLogin, onForgotPassword }) {
   const accessCode = import.meta.env.VITE_ORDERWATCH_ACCESS_CODE || "graphic-demo-2026";
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [showCode, setShowCode] = useState(false);
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const usesPassword = authMode === "supabase";
+  const login = config.login || {};
+  const usesLogoBanner = login.logoLayout === "banner";
 
   useEffect(() => {
     const previousMinWidth = document.body.style.minWidth;
@@ -20,7 +25,7 @@ export default function LoginView({ config, onLogin }) {
     };
   }, []);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -29,13 +34,45 @@ export default function LoginView({ config, onLogin }) {
       return;
     }
 
-    if (code.trim() !== accessCode) {
+    if (!usesPassword && code.trim() !== accessCode) {
       setError("Codice di accesso non corretto.");
       return;
     }
 
+    if (usesPassword && code.length < 8) {
+      setError("Inserisci la password personale.");
+      return;
+    }
+
     setError("");
-    onLogin({ email: normalizedEmail });
+    setNotice("");
+    setIsSubmitting(true);
+    try {
+      await onLogin({ email: normalizedEmail, password: usesPassword ? code : undefined });
+    } catch (submitError) {
+      setError(submitError.message || "Accesso non riuscito.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      setError("Inserisci prima la tua email aziendale.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    setIsSubmitting(true);
+    try {
+      await onForgotPassword(normalizedEmail);
+      setNotice("Ti abbiamo inviato le istruzioni per reimpostare la password.");
+    } catch (resetError) {
+      setError(resetError.message || "Invio delle istruzioni non riuscito.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -44,7 +81,13 @@ export default function LoginView({ config, onLogin }) {
         <section className="flex min-h-[660px] min-w-0 flex-col justify-between overflow-hidden rounded-[32px] p-7 shadow-soft sm:p-10 lg:p-14" style={{ backgroundColor: HERO_INK }}>
           <div className="flex min-h-[120px] items-center">
             {config.company.logoUrl ? (
-              <img className="h-32 w-auto max-w-[420px] object-contain sm:h-40 lg:h-48" src={config.company.logoUrl} alt={config.company.name} />
+              <img
+                className={usesLogoBanner
+                  ? "h-36 w-full max-w-[720px] rounded-[22px] object-cover object-center sm:h-40 lg:h-44"
+                  : "h-32 w-auto max-w-[420px] object-contain sm:h-40 lg:h-48"}
+                src={config.company.logoUrl}
+                alt={config.company.name}
+              />
             ) : (
               <div className="text-lg font-semibold text-white">{config.company.name}</div>
             )}
@@ -53,15 +96,15 @@ export default function LoginView({ config, onLogin }) {
           <div className="max-w-[780px]">
             <div className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-[15px] font-semibold text-white/90">
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: "var(--color-accent)" }} />
-              Pilota operativo OrderWatch
+              Accesso operativo OrderWatch
             </div>
 
             <h1 className="mt-8 max-w-[760px] text-[42px] font-semibold leading-[1.04] tracking-[-0.02em] text-white sm:text-[54px] xl:text-[64px]">
-              Ogni mattina sai quali materiali sono a rischio.
+              {login.headline || "Ogni mattina sai quali materiali sono a rischio."}
             </h1>
 
             <p className="mt-7 max-w-[610px] text-[20px] leading-8 text-white/70">
-              OrderWatch monitora ordini materiali, fornitori, PDF, DDT e scadenze dei lavori in corso.
+              {login.description || "OrderWatch monitora ordini materiali, fornitori, PDF, DDT e scadenze dei lavori in corso."}
             </p>
 
             <div className="mt-10 grid max-w-[760px] gap-4 sm:grid-cols-3">
@@ -94,7 +137,7 @@ export default function LoginView({ config, onLogin }) {
 
               <div className="mt-5 inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[13px] font-semibold" style={{ borderColor: "color-mix(in srgb, var(--color-accent) 24%, white)", backgroundColor: "color-mix(in srgb, var(--color-accent) 8%, white)", color: "var(--color-accent)" }}>
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Accesso pilota
+                Accesso riservato
               </div>
             </div>
 
@@ -103,7 +146,7 @@ export default function LoginView({ config, onLogin }) {
                 Accedi alla dashboard
               </h2>
               <p className="mt-4 text-[18px] leading-7" style={{ color: "var(--color-text-muted)" }}>
-                Inserisci email aziendale e codice pilota.
+                {usesPassword ? "Inserisci email aziendale e password personale." : "Inserisci email aziendale e codice di accesso."}
               </p>
             </div>
 
@@ -119,12 +162,12 @@ export default function LoginView({ config, onLogin }) {
                 autoComplete="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="nome@graphiccentergroup.it"
+                placeholder={login.emailPlaceholder || "nome@azienda.it"}
               />
             </div>
 
             <label className="mt-6 block text-[15px] font-semibold" htmlFor="access-code" style={{ color: "var(--color-primary)" }}>
-              Codice pilota
+              {usesPassword ? "Password" : "Codice di accesso"}
             </label>
             <div className="mt-3 flex h-16 items-center gap-3 rounded-[18px] border px-5" style={{ borderColor: "var(--color-border)" }}>
               <LockKeyhole className="h-5 w-5" style={{ color: "var(--color-text-muted)" }} />
@@ -132,16 +175,16 @@ export default function LoginView({ config, onLogin }) {
                 id="access-code"
                 className="min-w-0 flex-1 bg-transparent text-[17px] outline-none placeholder:text-slate-400"
                 type={showCode ? "text" : "password"}
-                autoComplete="current-password"
+                autoComplete={usesPassword ? "current-password" : "one-time-code"}
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
-                placeholder="OW-GC-••••"
+                placeholder={usesPassword ? "Password personale" : "OW-GC-••••"}
               />
               <button
                 className="inline-flex h-9 w-9 items-center justify-center rounded-md"
                 type="button"
                 onClick={() => setShowCode((value) => !value)}
-                aria-label={showCode ? "Nascondi codice" : "Mostra codice"}
+                aria-label={showCode ? (usesPassword ? "Nascondi password" : "Nascondi codice") : (usesPassword ? "Mostra password" : "Mostra codice")}
               >
                 {showCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -153,13 +196,25 @@ export default function LoginView({ config, onLogin }) {
               </p>
             )}
 
-            <Button className="mt-8 h-16 w-full rounded-[18px] text-[18px]" type="submit">
-              Entra
+            {notice && (
+              <p className="mt-5 rounded-[14px] border px-4 py-3 text-sm font-medium" style={{ borderColor: "var(--color-success)", color: "var(--color-success)" }}>
+                {notice}
+              </p>
+            )}
+
+            {usesPassword && (
+              <button className="mt-5 text-sm font-semibold" style={{ color: "var(--color-primary)" }} type="button" onClick={handleForgotPassword} disabled={isSubmitting}>
+                Password dimenticata?
+              </button>
+            )}
+
+            <Button className="mt-8 h-16 w-full rounded-[18px] text-[18px]" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Accesso..." : "Entra"}
               <CircleArrowRight className="h-5 w-5" />
             </Button>
 
             <p className="mt-8 text-center text-[15px] font-medium leading-6" style={{ color: "var(--color-text-muted)" }}>
-              Versione pilota collegata ai dati operativi Graphic Center.
+              {login.footer || `Dashboard operativa collegata ai dati ${config.company.name}.`}
             </p>
           </form>
         </aside>

@@ -11,6 +11,8 @@ export default function Topbar({
   searchQuery = "",
   onSearchChange,
   reviewItems = [],
+  unseenReviewCount,
+  onNotificationsOpened,
   onSelectReviewItem,
   lastUpdated,
   onRefresh,
@@ -20,7 +22,7 @@ export default function Topbar({
 
   return (
     <header
-      className="relative flex h-[68px] items-center justify-between border-b bg-white px-6"
+      className="relative flex h-[68px] min-w-0 items-center justify-between border-b bg-white px-3 sm:px-4 lg:px-6"
       style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}
     >
       <div
@@ -28,16 +30,16 @@ export default function Topbar({
         style={{ background: "linear-gradient(90deg, var(--color-primary), var(--color-accent))" }}
       />
       <div className="flex min-w-0 items-center gap-4">
-        <div>
-          <h1 className="text-[22px] font-semibold leading-7" style={{ color: "var(--color-text)" }}>
+        <div className="min-w-0">
+          <h1 className="truncate whitespace-nowrap text-[18px] font-semibold leading-7 sm:text-[22px]" style={{ color: "var(--color-text)" }}>
             {title}
           </h1>
-          <p className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>
+          <p className="hidden whitespace-nowrap text-[13px] md:block" style={{ color: "var(--color-text-muted)" }}>
             {tagline}
           </p>
         </div>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2 lg:gap-3">
         {companyName && (
           <>
             <div
@@ -66,7 +68,7 @@ export default function Topbar({
           <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
         </Button>
         <div
-          className="flex h-9 w-64 items-center gap-2 rounded-md border px-3"
+          className="hidden h-9 w-48 items-center gap-2 rounded-md border px-3 md:flex xl:w-64"
           style={{ borderColor: "var(--color-border)" }}
         >
           <Search className="h-4 w-4 shrink-0" style={{ color: "var(--color-text-muted)" }} />
@@ -84,15 +86,23 @@ export default function Topbar({
             variant="secondary"
             className="relative h-9 w-9 px-0"
             aria-label="Notifiche"
-            onClick={() => setNotificationsOpen((open) => !open)}
+            onClick={() => {
+              setNotificationsOpen((open) => {
+                // Aprire il pannello marca tutte le notifiche come viste:
+                // il badge si azzera subito, gli item restano in lista
+                // finche' non vengono cliccati.
+                if (!open) onNotificationsOpened?.();
+                return !open;
+              });
+            }}
           >
             <Bell className="h-4 w-4" />
-            {reviewItems.length > 0 && (
+            {(unseenReviewCount ?? reviewItems.length) > 0 && (
               <span
                 className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white"
                 style={{ backgroundColor: "var(--color-danger)" }}
               >
-                {reviewItems.length}
+                {unseenReviewCount ?? reviewItems.length}
               </span>
             )}
           </Button>
@@ -126,7 +136,7 @@ export default function Topbar({
                           type="button"
                           className="w-full rounded-md px-2 py-2 text-left text-sm transition hover:bg-[color:var(--color-primary-soft)]"
                           onClick={() => {
-                            onSelectReviewItem?.(item.view);
+                            onSelectReviewItem?.(item);
                             setNotificationsOpen(false);
                           }}
                         >

@@ -1,0 +1,18 @@
+CREATE INDEX IF NOT EXISTS idx_contact_emails_contact_fk ON public.contact_emails(contact_id);
+CREATE INDEX IF NOT EXISTS idx_contact_emails_source_email_fk ON public.contact_emails(source_email_id) WHERE source_email_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contact_aliases_contact_fk ON public.contact_aliases(contact_id);
+CREATE INDEX IF NOT EXISTS idx_contact_candidates_source_email_fk ON public.contact_candidates(source_email_id) WHERE source_email_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contact_candidates_source_contact_fk ON public.contact_candidates(source_contact_id) WHERE source_contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contact_candidates_matched_contact_fk ON public.contact_candidates(matched_contact_id) WHERE matched_contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contact_candidates_resolved_contact_fk ON public.contact_candidates(resolved_contact_id) WHERE resolved_contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contacts_merged_into_fk ON public.contacts(merged_into_contact_id) WHERE merged_into_contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contacts_legacy_supplier_fk ON public.contacts(legacy_supplier_id) WHERE legacy_supplier_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_suppliers_contact_fk ON public.suppliers(contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_customer_contact_fk ON public.projects(customer_contact_id) WHERE customer_contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_supplier_contact_fk ON public.orders(supplier_contact_id) WHERE supplier_contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_contact_fk ON public.documents(contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_material_lines_contact_fk ON public.material_lines(contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_quotes_contact_fk ON public.quotes(contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_delivery_notes_contact_fk ON public.delivery_notes(contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_invoices_contact_fk ON public.invoices(contact_id) WHERE contact_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_processed_emails_contact_fk ON public.processed_emails(contact_id) WHERE contact_id IS NOT NULL;

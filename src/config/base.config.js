@@ -59,11 +59,15 @@ const baseConfig = {
     dashboard: true,
     orders: true,
     projects: true,
+    contract_watch: false,
     suppliers: true,
+    contacts: true,
+    quotes: true,
     documents: true,
     imports: true,
     scorecard: true,
     reminders: true,
+    receiving: false,
     settings: true
   },
   alertRules: {

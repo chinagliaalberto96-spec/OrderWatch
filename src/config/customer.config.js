@@ -1,4 +1,5 @@
 import baseConfig from "./base.config";
+import novaVisionConfig from "./novaVision.config";
 
 // Configurazione cliente: Graphic Center Group Srl
 // Compilata da ORDERWATCH ONBOARDING - GRAPHIC CENTER GROUP SRL (giugno 2026).
@@ -22,7 +23,7 @@ const customerConfig = {
   brand: {
     clientInitials: "GC",
     orderWatchInitials: "OW",
-    orderWatchLogoUrl: "/brand/orderwatch-logo-trimmed.png",
+    orderWatchLogoUrl: "/brand/orderwatch-lockup-light.png",
     loginImageUrl: null
   },
   terminology: {
@@ -113,4 +114,8 @@ const customerConfig = {
   }
 };
 
-export default customerConfig;
+const selectedConfig = import.meta.env.VITE_CUSTOMER_PROFILE === "nova-vision"
+  ? novaVisionConfig
+  : customerConfig;
+
+export default selectedConfig;

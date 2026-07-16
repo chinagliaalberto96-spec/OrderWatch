@@ -24,15 +24,27 @@ function formatActivityDate(value) {
     .replace(",", " ·");
 }
 
-export default function ActivityFeed({ activities }) {
+export default function ActivityFeed({ activities, onSelect }) {
   return (
     <div className="space-y-1">
       {activities.map((activity) => {
         const Icon = icons[activity.type] || icons.ok;
         const tone = activity.type === "alert" ? "danger" : activity.type === "reminder" ? "warning" : "primary";
+        // Cliccabile solo se collegata a un ordine/lavoro e se il chiamante
+        // ha fornito la navigazione.
+        const interactive = typeof onSelect === "function" && Boolean(activity.orderCode || activity.projectCode);
+        const Tag = interactive ? "button" : "div";
 
         return (
-          <div key={activity.id} className="flex gap-3 rounded-md px-2 py-2">
+          <Tag
+            key={activity.id}
+            type={interactive ? "button" : undefined}
+            onClick={interactive ? () => onSelect(activity) : undefined}
+            className={`flex w-full gap-3 rounded-md px-2 py-2 text-left ${
+              interactive ? "cursor-pointer transition hover:bg-[color:var(--color-muted)]" : ""
+            }`}
+            title={interactive ? `Apri ${activity.orderCode || activity.projectCode}` : undefined}
+          >
             <div
               className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
               style={{
@@ -53,7 +65,7 @@ export default function ActivityFeed({ activities }) {
                 {activity.detail}
               </div>
             </div>
-          </div>
+          </Tag>
         );
       })}
     </div>

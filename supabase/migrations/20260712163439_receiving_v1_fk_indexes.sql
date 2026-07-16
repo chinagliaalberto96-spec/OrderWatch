@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS idx_purchase_order_lines_source_material ON public.purchase_order_lines(organization_id, source_material_line_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_note_lines_source_material ON public.delivery_note_lines(organization_id, source_material_line_id);

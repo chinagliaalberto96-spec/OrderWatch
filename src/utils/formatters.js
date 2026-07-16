@@ -1,14 +1,21 @@
 export function formatNumber(value) {
   if (value === null || value === undefined || value === "") return "-";
-  return new Intl.NumberFormat("it-IT").format(value);
+  // Nel backend prodotto alcuni campi (es. quantity) sono testo libero
+  // tipo "125 FG": se il valore non e' numerico va mostrato cosi' com'e'.
+  const numeric = typeof value === "number" ? value : Number(String(value).replace(",", "."));
+  if (!Number.isFinite(numeric)) return String(value);
+  return new Intl.NumberFormat("it-IT").format(numeric);
 }
 
 export function formatPercent(value) {
   if (value === null || value === undefined) return "-";
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "-";
+  const normalized = numeric > 1 ? numeric / 100 : numeric;
   return new Intl.NumberFormat("it-IT", {
     style: "percent",
     maximumFractionDigits: 0
-  }).format(value);
+  }).format(normalized);
 }
 
 export function humanizeColumn(column, terminology) {

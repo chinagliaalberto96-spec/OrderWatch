@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, PackageOpen, X } from "lucide-react";
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
 import OrderDetailPanel from "../components/OrderDetailPanel";
@@ -7,10 +8,23 @@ import { formatDate } from "../utils/dateUtils";
 import { formatNumber, humanizeColumn } from "../utils/formatters";
 import { getOrderStatus } from "../utils/statusRules";
 
-export default function OrdersView({ config, orders }) {
-  const [selectedOrder, setSelectedOrder] = useState(orders[0]);
+// Stati che richiedono un intervento del buyer: usati dal filtro "azioni
+// richieste" quando si arriva qui dal KPI della dashboard.
+const ACTION_STATUSES = ["OVERDUE", "CRITICAL", "TO_VERIFY"];
 
-  const rows = useMemo(
+export default function OrdersView({ config, orders, materialLines = [], focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onNavigate }) {
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
+  // Dopo un refresh dei dati (es. update dal pannello) l'ordine selezionato
+  // va riagganciato alla riga aggiornata, altrimenti mostra i valori vecchi.
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const fresh = orders.find((order) => order.id === selectedOrder.id);
+    if (fresh && fresh !== selectedOrder) setSelectedOrder(fresh);
+    if (!fresh) setSelectedOrder(null);
+  }, [orders, selectedOrder]);
+
+  const allRows = useMemo(
     () =>
       orders.map((order) => ({
         ...order,
@@ -19,10 +33,31 @@ export default function OrdersView({ config, orders }) {
     [orders, config.alertRules]
   );
 
+  const rows = useMemo(
+    () => (presetFilter === "actions" ? allRows.filter((row) => ACTION_STATUSES.includes(row.status)) : allRows),
+    [allRows, presetFilter]
+  );
+
+  // Drill-down dalla dashboard/notifiche: apre direttamente l'ordine indicato.
+  useEffect(() => {
+    if (!focusOrderCode) return;
+    const match = orders.find((order) => order.orderCode === focusOrderCode);
+    if (match) setSelectedOrder(match);
+  }, [focusOrderCode, orders]);
+
   const columns = config.tableColumns.orders.map((key) => ({
     key,
     label: humanizeColumn(key, config.terminology)
   }));
+
+  const materialNeeds = useMemo(
+    () => materialLines
+      .filter((line) => line.sourceType === "customer_request")
+      .filter((line) => !line.orderId && !line.orderCode)
+      .filter((line) => !/ricevut|arrivat|consegnat|complet|annullat/i.test(String(line.status || "")))
+      .sort((a, b) => new Date(a.requiredDate || "9999-12-31") - new Date(b.requiredDate || "9999-12-31")),
+    [materialLines]
+  );
 
   function renderCell(row, key) {
     if (key === "status") return <StatusBadge status={row.status} />;
@@ -39,18 +74,94 @@ export default function OrdersView({ config, orders }) {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-104px)] gap-0">
-      <main className="min-w-0 flex-1 pr-4">
-        <Card title={config.terminology.ordersPlural}>
-          <DataTable columns={columns} rows={rows} renderCell={renderCell} onRowClick={setSelectedOrder} />
-        </Card>
+    <div className="flex min-h-[calc(100vh-104px)] flex-col gap-4 xl:flex-row xl:gap-0">
+      <main className="min-w-0 flex-1 xl:pr-4">
+        {presetFilter === "actions" && (
+          <div className="mb-3 flex items-center gap-2">
+            <span
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] font-semibold"
+              style={{
+                borderColor: "color-mix(in srgb, var(--color-danger) 30%, white)",
+                backgroundColor: "color-mix(in srgb, var(--color-danger) 8%, white)",
+                color: "var(--color-danger)"
+              }}
+            >
+              Filtro: azioni richieste ({rows.length})
+              <button
+                type="button"
+                onClick={onClearFilter}
+                aria-label="Rimuovi filtro"
+                className="inline-flex h-5 w-5 items-center justify-center rounded-full transition hover:bg-white/60"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          </div>
+        )}
+        {rows.length ? (
+          <Card title={`${config.terminology.ordersPlural} registrati (${rows.length})`}>
+            <DataTable columns={columns} rows={rows} renderCell={renderCell} onRowClick={setSelectedOrder} />
+          </Card>
+        ) : (
+          <OrdersEmptyState filtered={presetFilter === "actions"} onNavigate={onNavigate} />
+        )}
+
+        {!presetFilter && materialNeeds.length > 0 && (
+          <section className="mt-8 border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Materiali ancora da ordinare</h2>
+                <p className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
+                  Richieste cliente gia' riconosciute, ma non ancora collegate a un ordine fornitore.
+                </p>
+              </div>
+              <span className="text-sm font-semibold" style={{ color: "var(--color-warning)" }}>{materialNeeds.length} da gestire</span>
+            </div>
+            <div className="mt-4 divide-y border-y" style={{ borderColor: "var(--color-border)" }}>
+              {materialNeeds.slice(0, 12).map((line) => (
+                <div key={line.id} className="grid gap-2 px-3 py-4 sm:grid-cols-[1fr_150px_130px] sm:items-center">
+                  <div className="min-w-0">
+                    <div className="font-semibold">{line.description || "Materiale da definire"}</div>
+                    <div className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
+                      {[line.projectCode, line.customerName, line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null].filter(Boolean).join(" · ") || "Richiesta da completare"}
+                    </div>
+                  </div>
+                  <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(line.requiredDate) || "Senza scadenza"}</span>
+                  <StatusBadge status={line.needsReview ? "TO_VERIFY" : "Da ordinare"} />
+                </div>
+              ))}
+            </div>
+            {materialNeeds.length > 12 && <p className="mt-3 text-xs" style={{ color: "var(--color-text-muted)" }}>Mostrate le prime 12 richieste per urgenza.</p>}
+          </section>
+        )}
       </main>
       <OrderDetailPanel
         order={selectedOrder}
         status={selectedOrder ? getOrderStatus(selectedOrder, config.alertRules) : null}
         terminology={config.terminology}
         onClose={() => setSelectedOrder(null)}
+        onUpdateOrder={onUpdateOrder}
+        onDeleteOrder={onDeleteOrder}
       />
     </div>
+  );
+}
+
+function OrdersEmptyState({ filtered, onNavigate }) {
+  return (
+    <section className="border-y px-5 py-14 text-center" style={{ borderColor: "var(--color-border)" }}>
+      <PackageOpen className="mx-auto h-8 w-8" style={{ color: "var(--color-text-muted)" }} />
+      <h2 className="mt-4 font-semibold">{filtered ? "Nessun ordine richiede un'azione" : "Nessun ordine fornitore registrato"}</h2>
+      <p className="mx-auto mt-2 max-w-xl text-sm" style={{ color: "var(--color-text-muted)" }}>
+        {filtered
+          ? "Gli ordini aperti non presentano scadenze o verifiche urgenti."
+          : "Gli ordini compariranno quando OrderWatch riconosce una conferma fornitore o quando il buyer prepara un ordine dai materiali richiesti."}
+      </p>
+      {!filtered && onNavigate && (
+        <button type="button" onClick={() => onNavigate("dashboard")} className="mt-5 inline-flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--color-primary)" }}>
+          Apri le azioni di oggi <ArrowRight className="h-4 w-4" />
+        </button>
+      )}
+    </section>
   );
 }

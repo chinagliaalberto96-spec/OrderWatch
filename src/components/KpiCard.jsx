@@ -1,8 +1,16 @@
-export default function KpiCard({ label, value, hint, tone = "primary", icon: Icon }) {
+export default function KpiCard({ label, value, hint, tone = "primary", icon: Icon, onClick }) {
+  const interactive = typeof onClick === "function";
+  const Tag = interactive ? "button" : "div";
+
   return (
-    <div
-      className="relative overflow-hidden rounded-lg border bg-white p-5 shadow-soft transition hover:shadow-elevated"
-      style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}
+    <Tag
+      type={interactive ? "button" : undefined}
+      onClick={onClick}
+      className={`relative overflow-hidden rounded-lg border bg-white p-5 text-left shadow-soft transition hover:shadow-elevated ${
+        interactive ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" : ""
+      }`}
+      style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)", outlineColor: "var(--color-accent)" }}
+      aria-label={interactive ? `${label}: apri il dettaglio` : undefined}
     >
       <div
         className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full opacity-[0.07]"
@@ -31,6 +39,6 @@ export default function KpiCard({ label, value, hint, tone = "primary", icon: Ic
           </div>
         )}
       </div>
-    </div>
+    </Tag>
   );
 }
