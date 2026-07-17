@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, CalendarClock, CheckCircle2, ChevronDown, Clock3, EyeOff, Inbox, Lightbulb, Mail, Send, X } from "lucide-react";
+import { ArrowRight, BriefcaseBusiness, Building2, CalendarClock, CheckCircle2, ChevronDown, Clock3, EyeOff, Inbox, Lightbulb, Mail, Send, Users, X } from "lucide-react";
 import { daysFromToday, formatDate } from "../utils/dateUtils";
 import { getOrderStatus } from "../utils/statusRules";
 import { getWorkflowMode, getWorkflowPolicy } from "../config/workflowModes";
+import { groupOperationalItemsByCounterparty } from "../utils/operationalGrouping";
 
 // Home "Oggi": la coda operativa E' la pagina. Il buyer deve capire in 10
 // secondi cosa fare adesso. Niente KPI/grafici come protagonisti: solo una
@@ -153,13 +154,23 @@ export default function DashboardView({
     return visibleQueue;
   }, [visibleQueue, filter]);
 
+  const counterpartyGroups = useMemo(
+    () => groupOperationalItemsByCounterparty(filteredQueue),
+    [filteredQueue]
+  );
+
+  const allCounterpartyGroups = useMemo(
+    () => groupOperationalItemsByCounterparty(visibleQueue),
+    [visibleQueue]
+  );
+
   const grouped = useMemo(() => {
     const groups = { urgent: [], high: [], medium: [], low: [] };
-    for (const item of filteredQueue) {
-      (groups[item.priority] || groups.low).push(item);
+    for (const group of counterpartyGroups) {
+      (groups[group.priority] || groups.low).push(group);
     }
     return groups;
-  }, [filteredQueue]);
+  }, [counterpartyGroups]);
 
   const processedEmails = [...(data.processedEmails || [])].sort((a, b) => {
     const av = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
@@ -277,7 +288,9 @@ export default function DashboardView({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-[19px] font-semibold" style={{ color: "var(--color-text)" }}>
-              {counts.total ? `${counts.total} ${counts.total === 1 ? "cosa richiede" : "cose richiedono"} attenzione oggi` : "Tutto sotto controllo"}
+              {counts.total
+                ? `${allCounterpartyGroups.length} ${allCounterpartyGroups.length === 1 ? "controparte" : "controparti"} · ${counts.total} attività da controllare oggi`
+                : "Tutto sotto controllo"}
             </h1>
             <p className="mt-0.5 text-sm" style={{ color: "var(--color-text-muted)" }}>
               <span className="capitalize">{dateLabel}</span>
@@ -321,16 +334,16 @@ export default function DashboardView({
                   <h2 className="text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-muted)" }}>
                     {group.label}
                   </h2>
-                  <span className="text-[13px] font-semibold" style={{ color: "var(--color-text-muted)" }}>· {items.length}</span>
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--color-text-muted)" }}>· {items.length} {items.length === 1 ? "controparte" : "controparti"}</span>
                 </div>
                 <div className="space-y-2">
-                  {items.map((item) => (
-                    <QueueItem
-                      key={item.id}
-                      item={item}
-                      onOpen={() => openItem(item)}
-                      onSnooze={() => snooze(item)}
-                      onPrepareSupplierOrder={onPrepareSupplierOrder ? () => onPrepareSupplierOrder(item) : null}
+                  {items.map((counterparty) => (
+                    <CounterpartyGroup
+                      key={counterparty.id}
+                      group={counterparty}
+                      onOpenItem={openItem}
+                      onSnoozeItem={snooze}
+                      onPrepareSupplierOrder={onPrepareSupplierOrder}
                     />
                   ))}
                 </div>
@@ -438,42 +451,42 @@ export default function DashboardView({
   );
 }
 
-function QueueItem({ item, onOpen, onSnooze, onPrepareSupplierOrder }) {
+function CounterpartyGroup({ group, onOpenItem, onSnoozeItem, onPrepareSupplierOrder }) {
   const [expanded, setExpanded] = useState(false);
-  const tone = priorityTone(item.priority);
+  const tone = priorityTone(group.priority);
   const color = toneColor(tone);
-  const context = [item.supplierName || item.customerName, item.orderCode || item.projectCode].filter(Boolean).join(" · ");
-  // La riga materiale con fornitore puo' diventare un ordine d'acquisto.
-  const showPrepareOrder = item.kind === "material_line" && item.canPrepareSupplierOrder && onPrepareSupplierOrder;
-  const materialLines = item.kind === "supplier_material_group" ? item.lineItems || [] : [];
-
-  // Un click sulla riga fa due cose insieme: apre il pannello destro (azione
-  // principale) e apre qui sotto il macro-dettaglio (fornitore/cliente,
-  // riferimento, testo) che prima stava sempre visibile appesantendo la riga.
-  function handleRowClick() {
-    setExpanded((value) => !value);
-    onOpen();
-  }
+  const Icon = group.type === "supplier"
+    ? Building2
+    : group.type === "customer"
+      ? Users
+      : group.type === "project"
+        ? BriefcaseBusiness
+        : Inbox;
+  const typeLabel = group.type === "supplier"
+    ? "Fornitore"
+    : group.type === "customer"
+      ? "Cliente"
+      : group.type === "project"
+        ? "Lavoro"
+        : "Da identificare";
 
   return (
     <div className="rounded-lg border bg-white shadow-soft" style={{ borderColor: "var(--color-border)" }}>
-      <button type="button" onClick={handleRowClick} className="flex w-full items-center gap-2.5 px-3 py-2 text-left">
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-        <span className="hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold sm:inline" style={{ backgroundColor: `color-mix(in srgb, ${color} 12%, white)`, color }}>
-          {KIND_LABEL[item.kind] || "Task"}
+      <button type="button" onClick={() => setExpanded((value) => !value)} className="flex w-full items-center gap-3 px-3 py-3 text-left">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md" style={{ backgroundColor: `color-mix(in srgb, ${color} 10%, white)`, color }}>
+          <Icon className="h-4 w-4" />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>
-          {item.title || "Elemento da gestire"}
-        </span>
-        {Number.isFinite(Number(item.confidence)) && Number(item.confidence) < 0.85 && (
-          <span className="hidden shrink-0 text-[12px] font-semibold sm:inline" style={{ color: "var(--color-warning)" }}>dato incerto</span>
-        )}
-        {item.dueDate && (
-          <span className="hidden shrink-0 items-center gap-1 text-[12px] sm:inline-flex" style={{ color: "var(--color-text-muted)" }}>
-            <Clock3 className="h-3 w-3" />
-            {formatDate(item.dueDate)}
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[14px] font-semibold" style={{ color: "var(--color-text)" }}>{group.label}</span>
+            <span className="hidden shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase sm:inline" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>{typeLabel}</span>
           </span>
-        )}
+          <span className="mt-0.5 block text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+            {group.items.length} attività
+            {group.urgentCount > 0 ? ` · ${group.urgentCount} urgenti` : ""}
+            {group.reviewCount > 0 ? ` · ${group.reviewCount} da verificare` : ""}
+          </span>
+        </span>
         <ChevronDown
           className="h-4 w-4 shrink-0 transition-transform"
           style={{ color: "var(--color-text-muted)", transform: expanded ? "rotate(180deg)" : "none" }}
@@ -481,52 +494,60 @@ function QueueItem({ item, onOpen, onSnooze, onPrepareSupplierOrder }) {
       </button>
 
       {expanded && (
-        <div className="space-y-2 border-t px-3 py-2.5" style={{ borderColor: "var(--color-border)" }}>
-          {context && (
-            <div className="truncate text-[13px] font-medium" style={{ color: "var(--color-text-muted)" }}>{context}</div>
-          )}
-          {item.detail && (
-            <div className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>{item.detail}</div>
-          )}
-          {materialLines.length > 0 && (
-            <div className="overflow-hidden rounded-md border" style={{ borderColor: "var(--color-border)" }}>
-              {materialLines.map((line) => (
-                <MaterialLineRow key={line.id} line={line} compact />
-              ))}
-            </div>
-          )}
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onOpen}
-              className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-semibold text-white transition"
-              style={{ backgroundColor: color }}
-            >
-              {item.actionLabel || "Apri"}
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-            {showPrepareOrder && (
-              <button
-                type="button"
-                onClick={onPrepareSupplierOrder}
-                className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] font-semibold transition hover:bg-[color:var(--color-muted)]"
-                style={{ borderColor: "var(--color-border)", color: "var(--color-primary)" }}
-              >
-                Prepara ordine fornitore
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onSnooze}
-              className="inline-flex items-center gap-1 text-[12px] font-medium transition hover:underline"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              <EyeOff className="h-3 w-3" />
-              Ignora oggi
-            </button>
-          </div>
+        <div className="divide-y border-t" style={{ borderColor: "var(--color-border)" }}>
+          {group.items.map((item) => (
+            <CounterpartyTaskRow
+              key={item.id}
+              item={item}
+              onOpen={() => onOpenItem(item)}
+              onSnooze={() => onSnoozeItem(item)}
+              onPrepareSupplierOrder={item.kind === "material_line" && item.canPrepareSupplierOrder && onPrepareSupplierOrder
+                ? () => onPrepareSupplierOrder(item)
+                : null}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function CounterpartyTaskRow({ item, onOpen, onSnooze, onPrepareSupplierOrder }) {
+  const color = toneColor(priorityTone(item.priority));
+  const reference = item.orderCode || item.projectCode;
+
+  return (
+    <div className="flex items-start gap-2.5 px-3 py-2.5">
+      <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-[11px] font-semibold uppercase" style={{ color }}>{KIND_LABEL[item.kind] || "Attività"}</span>
+          {reference && <span className="text-[11px] font-medium" style={{ color: "var(--color-text-muted)" }}>{reference}</span>}
+        </span>
+        <span className="mt-0.5 block text-[13.5px] font-semibold" style={{ color: "var(--color-text)" }}>{item.title || "Elemento da gestire"}</span>
+        <span className="mt-0.5 line-clamp-1 block text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+          {item.detail || item.actionLabel || "Apri per gestire"}
+        </span>
+      </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {item.dueDate && (
+          <span className="hidden items-center gap-1 text-[11px] sm:inline-flex" style={{ color: "var(--color-text-muted)" }}>
+            <Clock3 className="h-3 w-3" />
+            {formatDate(item.dueDate)}
+          </span>
+        )}
+        {onPrepareSupplierOrder && (
+          <button type="button" onClick={onPrepareSupplierOrder} className="rounded-md border px-2 py-1 text-[11px] font-semibold hover:bg-[color:var(--color-muted)]" style={{ borderColor: "var(--color-border)", color: "var(--color-primary)" }}>
+            Prepara ordine
+          </button>
+        )}
+        <button type="button" onClick={onSnooze} className="rounded-md p-1.5 hover:bg-[color:var(--color-muted)]" aria-label="Ignora oggi" title="Ignora oggi">
+          <EyeOff className="h-3.5 w-3.5" style={{ color: "var(--color-text-muted)" }} />
+        </button>
+        <button type="button" onClick={onOpen} className="rounded-md p-1.5 hover:bg-[color:var(--color-muted)]" aria-label="Apri attività">
+          <ArrowRight className="h-3.5 w-3.5" style={{ color }} />
+        </button>
+      </div>
     </div>
   );
 }
