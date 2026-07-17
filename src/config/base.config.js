@@ -19,6 +19,8 @@ const baseConfig = {
     documentSingular: "Documento",
     importsPlural: "Importazioni",
     importSingular: "Importazione",
+    invoicesPlural: "Fatture",
+    invoiceSingular: "Fattura",
     dueDate: "Data consegna promessa",
     material: "Materiale / Componente",
     customer: "Cliente",
@@ -65,6 +67,7 @@ const baseConfig = {
     quotes: true,
     documents: true,
     imports: true,
+    invoices: true,
     scorecard: true,
     reminders: true,
     receiving: false,
@@ -92,6 +95,7 @@ const baseConfig = {
     suppliers: ["name", "email", "onTimeRate", "openOrders", "risk", "score"],
     projects: ["projectCode", "customer", "owner", "status", "dueDate", "openOrders"],
     documents: ["name", "type", "supplierName", "linkedOrder", "confidence", "receivedAt"],
+    invoices: ["invoiceNumber", "supplierName", "totalAmount", "invoiceDate", "dueDate", "linked", "status"],
     processedEmails: ["receivedAt", "subject", "from", "classification", "status", "linkedProjectCode", "errorDetail"]
   }
 };

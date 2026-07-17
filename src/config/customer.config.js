@@ -98,6 +98,7 @@ const customerConfig = {
     suppliers: ["name", "email", "onTimeRate", "openOrders", "risk", "score"],
     projects: ["projectCode", "customer", "owner", "status", "dueDate", "openOrders"],
     documents: ["name", "type", "supplierName", "linkedOrder", "confidence", "receivedAt"],
+    invoices: ["invoiceNumber", "supplierName", "totalAmount", "invoiceDate", "dueDate", "linked", "status"],
     // Aggiunta: mancava la colonna per la pagina Importazioni (ImportsView), che
     // quindi mostrava una tabella senza colonne in produzione. linkedProjectCode
     // (non linkedOrderCode, che non esiste nella tabella Airtable "Processed Emails").

@@ -49,7 +49,11 @@ export function humanizeColumn(column, terminology) {
     classification: "Classificazione",
     linkedOrderCode: "Ordine collegato",
     linkedProjectCode: "Lavoro collegato",
-    errorDetail: "Errore"
+    errorDetail: "Errore",
+    invoiceNumber: "Numero fattura",
+    totalAmount: "Importo",
+    invoiceDate: "Data fattura",
+    linked: "Ordine/Lavoro"
   };
   return labels[column] || column;
 }

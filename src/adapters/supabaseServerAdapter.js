@@ -185,6 +185,18 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       needsReview: Boolean(row.needs_review),
       createdAt: row.created_at
     }),
+    materialLineRevisions: (row) => ({
+      id: row.id,
+      materialLineId: row.material_line_id,
+      revisionType: row.revision_type,
+      sourceEmailId: row.source_email_id,
+      sourceDocumentId: row.source_document_id,
+      previousValues: row.previous_values || {},
+      newValues: row.new_values || {},
+      changedFields: row.changed_fields || [],
+      summary: row.summary,
+      createdAt: row.created_at
+    }),
     customerConfirmations: (row) => ({
       id: row.id,
       sourceEmailId: row.source_email_id,
@@ -429,6 +441,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         activities,
         reminders,
         materialLines,
+        materialLineRevisions,
         dailyReports,
         processedEmails,
         settings,
@@ -454,6 +467,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           this.getActivities(),
           this.getReminders(),
           this.getMaterialLines(),
+          this.getMaterialLineRevisions(),
           this.getDailyReports(),
           this.getProcessedEmails(),
           this.getSettings(),
@@ -525,6 +539,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         activities,
         reminders,
         materialLines,
+        materialLineRevisions,
         dailyReports,
         processedEmails,
         settings,
@@ -579,6 +594,9 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
     },
     async getMaterialLines() {
       return mapRows("materialLines", await request("material_lines?select=*&order=created_at.desc&limit=300"));
+    },
+    async getMaterialLineRevisions() {
+      return mapRows("materialLineRevisions", await request("material_line_revisions?select=*&order=created_at.asc&limit=1000"));
     },
     async getDailyReports() {
       return mapRows("dailyReports", await request("daily_reports?select=*&order=report_date.desc&limit=90"));
@@ -767,8 +785,11 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
     ...materialItems,
     ...quotes.flatMap(quoteToOperationalItems),
     ...deliveryNotes.flatMap((note) => deliveryNoteToOperationalItems(note, traceabilityMode)),
-    ...invoices.flatMap((invoice) => invoiceToOperationalItems(invoice, traceabilityMode)),
-    ...processedEmails.filter((email) => email.status === "Error" || email.status === "Processing").map(emailToOperationalItem),
+    // Errori/importazioni in corso NON compaiono piu' nella coda "Oggi": sono
+    // segnalazioni tecniche di sistema, non attivita' del buyer. Restano
+    // visibili e verificabili nella vista Importazioni.
+    // Le fatture non entrano nella coda "Oggi": non e' lo scope di OrderWatch
+    // (nessuna gestione contabile/pagamenti). Restano nel tab Fatture dedicato.
     ...buyerActions.filter((action) => action.status !== "done").map(actionToOperationalItem),
     ...operationalActions.filter((action) => action.status === "open").map(sharedActionToOperationalItem),
     // Gating backend: se il modulo ordini fornitore non e' nel piano del
@@ -940,6 +961,8 @@ export function buildOperationalSuggestions({ materialLines = [], deliveryNotes 
       date: line.createdAt
     }));
 
+  // Le fatture non compaiono neanche come suggerimento facoltativo: non e'
+  // lo scope di OrderWatch. Restano nel tab Fatture dedicato.
   const documentSuggestions = [
     ...deliveryNotes.filter((item) => !item.orderCode && !item.projectCode && !item.needsReview).map((item) => ({
       id: `suggestion-ddt-${item.id}`,
@@ -949,17 +972,6 @@ export function buildOperationalSuggestions({ materialLines = [], deliveryNotes 
       subtitle: item.supplierName || "",
       detail: "Collegamento facoltativo a ordine o commessa.",
       supplierName: item.supplierName,
-      date: item.createdAt
-    })),
-    ...invoices.filter((item) => !item.orderCode && !item.projectCode && !item.needsReview).map((item) => ({
-      id: `suggestion-invoice-${item.id}`,
-      kind: "invoice",
-      entityId: item.id,
-      title: item.invoiceNumber || "Fattura senza collegamento",
-      subtitle: item.supplierName || item.customerName || "",
-      detail: "Collegamento facoltativo a ordine o commessa.",
-      supplierName: item.supplierName,
-      customerName: item.customerName,
       date: item.createdAt
     }))
   ];
@@ -1158,47 +1170,6 @@ function deliveryNoteToOperationalItems(note, traceabilityMode = "required_link"
   }];
 }
 
-function invoiceToOperationalItems(invoice, traceabilityMode = "required_link") {
-  const needsReview = Boolean(invoice.needsReview) || invoice.status === "to_review";
-  const unlinked = !invoice.orderCode && !invoice.projectCode;
-  const linkActionable = unlinked && getWorkflowPolicy(traceabilityMode).requiresLinks;
-  if (!needsReview && !linkActionable) return [];
-
-  return [{
-    id: `invoice-${invoice.id}`,
-    kind: "invoice",
-    entityId: invoice.id,
-    priority: needsReview ? "high" : "medium",
-    status: needsReview ? "needs_review" : "needs_link",
-    title: invoice.invoiceNumber || "Fattura da collegare",
-    subtitle: invoice.supplierName || invoice.supplierVat || invoice.orderCode || "",
-    detail: invoice.notes || "Fattura non collegata con certezza.",
-    actionLabel: "Collega fattura",
-    dueDate: invoice.dueDate || invoice.invoiceDate,
-    projectCode: invoice.projectCode,
-    orderCode: invoice.orderCode,
-    supplierName: invoice.supplierName,
-    confidence: invoice.confidence,
-    date: invoice.createdAt,
-    sortDate: invoice.dueDate || invoice.invoiceDate || invoice.createdAt
-  }];
-}
-
-function emailToOperationalItem(email) {
-  return {
-    id: `processed-email-${email.id}`,
-    kind: "processed_email",
-    entityId: email.id,
-    priority: email.status === "Error" ? "urgent" : "high",
-    status: email.status === "Error" ? "error" : "processing",
-    title: email.subject || "Email da controllare",
-    subtitle: email.from || email.mailbox || "",
-    detail: email.errorDetail || "Importazione non conclusa.",
-    actionLabel: "Controlla importazione",
-    date: email.receivedAt,
-    sortDate: email.receivedAt
-  };
-}
 
 function actionToOperationalItem(action) {
   return {

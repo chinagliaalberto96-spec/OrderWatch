@@ -10,6 +10,7 @@ import { filterRows } from "./utils/search";
 import DashboardView from "./views/DashboardView";
 import SupplierOrderDrawer from "./components/SupplierOrderDrawer";
 import DocumentsView from "./views/DocumentsView";
+import InvoicesView from "./views/InvoicesView";
 import ImportsView from "./views/ImportsView";
 import LoginView from "./views/LoginView";
 import NotificationsView from "./views/NotificationsView";
@@ -35,6 +36,7 @@ const viewLabels = (terminology) => ({
   contacts: "Anagrafica",
   quotes: "Quotazioni",
   documents: terminology.documentsPlural,
+  invoices: terminology.invoicesPlural || "Fatture",
   imports: terminology.importsPlural || "Importazioni",
   reminders: "Notifiche",
   receiving: "Ricevimenti",
@@ -185,7 +187,7 @@ export default function App() {
 
   const navItems = useMemo(
     () =>
-      ["dashboard", "orders", "projects", "contract_watch", "suppliers", "contacts", "quotes", "receiving", "documents", "imports", "reminders", "settings"]
+      ["dashboard", "orders", "projects", "contract_watch", "suppliers", "contacts", "quotes", "receiving", "documents", "invoices", "imports", "reminders", "settings"]
         .filter((key) => (config.modules[key] || backendModuleFlags[key] === true) && backendModuleFlags[key] !== false)
         .filter((key) => canAccessView(sessionUser?.role, key))
         .map((key) => ({ key, label: labels[key] })),
@@ -305,6 +307,7 @@ export default function App() {
       contacts: filterRows(data.contacts || [], searchQuery),
       materialLines: filterRows(data.materialLines || [], searchQuery),
       documents: filterRows(data.documents, searchQuery),
+      invoices: filterRows(data.invoices || [], searchQuery),
       processedEmails: filterRows(data.processedEmails || [], searchQuery),
       reminders: filterRows(data.reminders || [], searchQuery)
     };
@@ -670,6 +673,7 @@ export default function App() {
               onUpdateOrder={handleUpdateOrder}
               onDeleteOrder={handleDeleteOrder}
               materialLines={filteredData.materialLines || []}
+              materialLineRevisions={data.materialLineRevisions || []}
               onNavigate={handleNavigate}
             />
           )}
@@ -720,6 +724,7 @@ export default function App() {
           {activeView === "quotes" && <QuotesView data={filteredData} onNavigate={handleNavigate} />}
           {activeView === "receiving" && <ReceivingView adapter={adapter} readOnly={sessionUser?.role === "ReadOnly"} />}
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
+          {activeView === "invoices" && <InvoicesView config={config} invoices={filteredData.invoices} />}
           {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} />}
           {activeView === "reminders" && <NotificationsView config={config} data={filteredData} />}
           {activeView === "settings" && (
