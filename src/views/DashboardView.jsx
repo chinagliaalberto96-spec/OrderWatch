@@ -63,7 +63,7 @@ function loadSnoozed() {
 
 function viewForItem(item) {
   if (item.kind === "operational_action") return "contract_watch";
-  if (item.kind === "supplier_material_group") return "suppliers";
+  if (item.kind === "supplier_material_group") return item.orderCode ? "orders" : "suppliers";
   if (item.kind === "quote") return "quotes";
   if (item.kind === "invoice" || item.kind === "delivery_note") return "documents";
   if (item.kind === "processed_email") return "imports";
@@ -74,6 +74,15 @@ function viewForItem(item) {
 function contextForItem(item) {
   if (item.kind === "operational_action") {
     return { projectCode: item.projectCode, billingItemId: item.sourceEntityId };
+  }
+  if (item.kind === "supplier_material_group" && !item.orderCode) {
+    const lines = item.lineItems || [];
+    return {
+      supplierId: item.supplierId || lines.find((line) => line.supplierId)?.supplierId || null,
+      supplierName: item.supplierName || null,
+      supplierTab: "materials",
+      materialLineIds: lines.map((line) => line.entityId).filter(Boolean)
+    };
   }
   if (item.orderCode) return { orderCode: item.orderCode };
   if (item.projectCode) return { projectCode: item.projectCode };

@@ -43,8 +43,15 @@ export default function SupplierOrderDrawer({ open, item, data = {}, adapter, on
           const existing = (data.supplierDispatches || []).find((d) => d.id === (item.dispatchId || item.entityId));
           if (existing) setDispatch(existing);
         } else {
-          // Riga materiale: prepara (o riusa) la bozza ordine
-          const res = await adapter.supplierOrderAction({ action: "prepare", materialLineIds: [item.entityId] });
+          // Una singola riga o la selezione aperta dalla home Oggi: prepara
+          // una sola bozza mantenendo insieme tutti i materiali del fornitore.
+          const materialLineIds = Array.isArray(item.materialLineIds) && item.materialLineIds.length
+            ? item.materialLineIds
+            : (item.lineItems || []).map((line) => line.entityId || line.id).filter(Boolean);
+          const res = await adapter.supplierOrderAction({
+            action: "prepare",
+            materialLineIds: materialLineIds.length ? materialLineIds : [item.entityId]
+          });
           if (!cancelled) setDispatch(res.dispatch);
         }
       } catch (error) {

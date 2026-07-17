@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
+  CheckCircle2,
   ChevronRight,
   Clock3,
+  Link2,
   Mail,
   PackageCheck,
   Pencil,
   Phone,
   Plus,
   Search,
+  Send,
   Star,
   Trash2,
   Users
@@ -96,8 +99,16 @@ export default function SuppliersView({
   supplierContacts = [],
   materialLines = [],
   orders = [],
+  projects = [],
   activities = [],
-  onSupplierAction
+  focusSupplierId,
+  focusSupplierName,
+  focusTab,
+  focusMaterialLineIds = [],
+  onSupplierAction,
+  onVerifyMaterialLines,
+  onLinkMaterialLines,
+  onPrepareSupplierOrder
 }) {
   const [selectedId, setSelectedId] = useState(null);
   const [view, setView] = useState("operational");
@@ -112,6 +123,16 @@ export default function SuppliersView({
   useEffect(() => {
     if (selectedId && !selected) setSelectedId(null);
   }, [selected, selectedId]);
+
+  // Drill-down da Oggi: apre direttamente l'anagrafica corretta. Il fallback
+  // sul nome serve quando il record operativo proviene da un alias o da un
+  // fornitore duplicato che possiede un ID diverso da quello canonico.
+  useEffect(() => {
+    if (!focusSupplierId && !focusSupplierName) return;
+    const match = enriched.find((item) => item.id === focusSupplierId)
+      || enriched.find((item) => normalize(item.name) === normalize(focusSupplierName));
+    if (match) setSelectedId(match.id);
+  }, [enriched, focusSupplierId, focusSupplierName]);
 
   const counts = useMemo(() => ({
     operational: enriched.filter((item) => item.registryStatus !== "candidate" && item.hasOperationalHistory).length,
@@ -141,8 +162,15 @@ export default function SuppliersView({
         supplier={selected}
         terminology={config.terminology}
         contacts={supplierContacts.filter((item) => item.supplierId === selected.id)}
+        projects={projects}
+        orders={orders}
+        initialTab={focusTab}
+        focusMaterialLineIds={focusMaterialLineIds}
         onBack={() => setSelectedId(null)}
         onSupplierAction={onSupplierAction}
+        onVerifyMaterialLines={onVerifyMaterialLines}
+        onLinkMaterialLines={onLinkMaterialLines}
+        onPrepareSupplierOrder={onPrepareSupplierOrder}
       />
     );
   }
@@ -221,20 +249,54 @@ export default function SuppliersView({
   );
 }
 
-function SupplierProfile({ supplier, terminology, contacts, onBack, onSupplierAction }) {
-  const [tab, setTab] = useState("overview");
+function SupplierProfile({
+  supplier,
+  terminology,
+  contacts,
+  projects = [],
+  orders = [],
+  initialTab,
+  focusMaterialLineIds = [],
+  onBack,
+  onSupplierAction,
+  onVerifyMaterialLines,
+  onLinkMaterialLines,
+  onPrepareSupplierOrder
+}) {
+  const [tab, setTab] = useState(initialTab || "overview");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ email: supplier.email || "", phone: supplier.phone || "", notes: supplier.notes || "" });
   const [newContact, setNewContact] = useState({ name: "", email: "", role: "" });
   const [addingContact, setAddingContact] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [selectedLineIds, setSelectedLineIds] = useState(focusMaterialLineIds);
+  const [linking, setLinking] = useState(false);
+  const [linkDraft, setLinkDraft] = useState({ projectCode: "", orderCode: "" });
 
   useEffect(() => {
     setDraft({ email: supplier.email || "", phone: supplier.phone || "", notes: supplier.notes || "" });
     setEditing(false);
     setMessage("");
   }, [supplier.id, supplier.email, supplier.phone, supplier.notes]);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab, supplier.id]);
+
+  useEffect(() => {
+    setSelectedLineIds(focusMaterialLineIds);
+    setLinking(false);
+    setLinkDraft({ projectCode: "", orderCode: "" });
+  }, [focusMaterialLineIds, supplier.id]);
+
+  useEffect(() => {
+    if (tab !== "materials" || !focusMaterialLineIds.length) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`supplier-material-${focusMaterialLineIds[0]}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusMaterialLineIds, supplier.id, tab]);
 
   async function run(action, payload, successMessage) {
     if (!onSupplierAction) return;
@@ -263,6 +325,30 @@ function SupplierProfile({ supplier, terminology, contacts, onBack, onSupplierAc
     await run("add_contact", { supplierId: supplier.id, ...newContact }, "Contatto aggiunto.");
     setNewContact({ name: "", email: "", role: "" });
     setAddingContact(false);
+  }
+
+  async function runLineAction(callback, successMessage) {
+    if (!callback || !selectedLineIds.length) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await callback();
+      setMessage(successMessage);
+    } catch (error) {
+      setMessage(`Errore: ${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function prepareSelectedLines() {
+    if (!onPrepareSupplierOrder || !selectedLineIds.length) return;
+    onPrepareSupplierOrder({
+      kind: "material_line_selection",
+      materialLineIds: selectedLineIds,
+      supplierId: supplier.id,
+      supplierName: supplier.name
+    });
   }
 
   const tabs = [
@@ -333,7 +419,31 @@ function SupplierProfile({ supplier, terminology, contacts, onBack, onSupplierAc
       <div className="pt-7">
         {tab === "overview" && <Overview supplier={supplier} contacts={contacts} />}
         {tab === "orders" && <OrdersList orders={supplier.supplierOrders} />}
-        {tab === "materials" && <MaterialsList lines={supplier.supplierLines} />}
+        {tab === "materials" && (
+          <MaterialsList
+            lines={supplier.supplierLines}
+            focusLineIds={focusMaterialLineIds}
+            selectedLineIds={selectedLineIds}
+            onSelectionChange={setSelectedLineIds}
+            projects={projects}
+            orders={orders}
+            linking={linking}
+            setLinking={setLinking}
+            linkDraft={linkDraft}
+            setLinkDraft={setLinkDraft}
+            busy={busy}
+            editable={Boolean(onVerifyMaterialLines || onLinkMaterialLines || onPrepareSupplierOrder)}
+            onPrepare={onPrepareSupplierOrder ? prepareSelectedLines : null}
+            onVerify={onVerifyMaterialLines ? () => runLineAction(
+              () => onVerifyMaterialLines(selectedLineIds),
+              `${selectedLineIds.length === 1 ? "Riga verificata" : "Righe verificate"}.`
+            ) : null}
+            onLink={onLinkMaterialLines ? () => runLineAction(
+              () => onLinkMaterialLines(selectedLineIds, linkDraft),
+              `${selectedLineIds.length === 1 ? "Riga collegata" : "Righe collegate"}.`
+            ) : null}
+          />
+        )}
         {tab === "contacts" && (
           <ContactsList
             contacts={contacts}
@@ -381,9 +491,100 @@ function OrdersList({ orders }) {
   return <div className="divide-y border-y" style={{ borderColor: "var(--color-border)" }}>{orders.map((order) => <div key={order.id} className="grid gap-2 px-3 py-4 sm:grid-cols-[150px_1fr_130px_120px] sm:items-center"><strong>{order.orderCode || "Senza codice"}</strong><span>{order.material || "Materiale non specificato"}</span><span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(order.dueDate) || "Senza data"}</span><StatusBadge status={order.status} /></div>)}</div>;
 }
 
-function MaterialsList({ lines }) {
+function MaterialsList({
+  lines,
+  focusLineIds = [],
+  selectedLineIds = [],
+  onSelectionChange,
+  projects = [],
+  orders = [],
+  linking,
+  setLinking,
+  linkDraft,
+  setLinkDraft,
+  busy,
+  editable,
+  onPrepare,
+  onVerify,
+  onLink
+}) {
   if (!lines.length) return <EmptyState text="Nessuna riga materiale collegata a questo fornitore." />;
-  return <div className="divide-y border-y" style={{ borderColor: "var(--color-border)" }}>{lines.map((line) => <div key={line.id} className="grid gap-2 px-3 py-4 sm:grid-cols-[1fr_120px_140px_120px] sm:items-center"><div><strong>{line.description || "Materiale"}</strong><div className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>{line.orderCode || line.sourceType || "Origine non indicata"}</div></div><span>{line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : "-"}</span><span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(line.dueDate || line.requiredDate) || "Senza data"}</span><StatusBadge status={line.status} /></div>)}</div>;
+  const focused = new Set(focusLineIds);
+  const selected = new Set(selectedLineIds);
+  const selectedLines = lines.filter((line) => selected.has(line.id));
+  const reviewCount = selectedLines.filter((line) => line.needsReview || String(line.status).toLowerCase() === "needs_review").length;
+  const openProjects = projects.filter((project) => !["Chiuso", "Concluso", "Annullato"].includes(project.status));
+  const openOrders = orders.filter((order) => !CLOSED_STATUSES.has(String(order.status || "").toLowerCase()));
+
+  function toggleLine(id) {
+    onSelectionChange?.(selected.has(id)
+      ? selectedLineIds.filter((lineId) => lineId !== id)
+      : [...selectedLineIds, id]);
+  }
+
+  function updateOrder(orderCode) {
+    const order = openOrders.find((candidate) => candidate.orderCode === orderCode);
+    setLinkDraft({ projectCode: order?.projectCode || linkDraft.projectCode || "", orderCode });
+  }
+
+  return (
+    <div>
+      {editable && selectedLineIds.length > 0 && (
+        <div className="mb-4 rounded-md border p-3" style={{ borderColor: "var(--color-primary)", backgroundColor: "var(--color-primary-soft)" }}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold">{selectedLineIds.length} {selectedLineIds.length === 1 ? "riga selezionata" : "righe selezionate"}</div>
+              <div className="mt-0.5 text-xs" style={{ color: "var(--color-text-muted)" }}>Le azioni vengono applicate soltanto ai materiali selezionati.</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {onPrepare && <Button onClick={onPrepare} disabled={busy}><Send className="h-4 w-4" /> Prepara ordine</Button>}
+              {onVerify && reviewCount > 0 && <Button variant="secondary" onClick={onVerify} disabled={busy}><CheckCircle2 className="h-4 w-4" /> Verifica</Button>}
+              {onLink && <Button variant="secondary" onClick={() => setLinking(!linking)} disabled={busy}><Link2 className="h-4 w-4" /> Collega</Button>}
+            </div>
+          </div>
+          {linking && (
+            <div className="mt-3 grid gap-2 border-t pt-3 sm:grid-cols-[1fr_1fr_auto]" style={{ borderColor: "var(--color-border)" }}>
+              <select value={linkDraft.projectCode} onChange={(event) => setLinkDraft({ ...linkDraft, projectCode: event.target.value })} className="rounded-md border bg-white px-3 py-2 text-sm" style={{ borderColor: "var(--color-border)" }}>
+                <option value="">Seleziona lavoro</option>
+                {openProjects.map((project) => <option key={project.id} value={project.projectCode}>{project.projectCode} - {project.customer || project.owner || "Senza cliente"}</option>)}
+              </select>
+              <select value={linkDraft.orderCode} onChange={(event) => updateOrder(event.target.value)} className="rounded-md border bg-white px-3 py-2 text-sm" style={{ borderColor: "var(--color-border)" }}>
+                <option value="">Seleziona ordine</option>
+                {openOrders.map((order) => <option key={order.id} value={order.orderCode}>{order.orderCode} - {order.supplierName || "Fornitore n.d."}</option>)}
+              </select>
+              <Button onClick={onLink} disabled={busy || (!linkDraft.projectCode && !linkDraft.orderCode)}>Salva collegamento</Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="divide-y border-y" style={{ borderColor: "var(--color-border)" }}>
+        {lines.map((line) => {
+          const highlighted = focused.has(line.id);
+          return (
+            <div
+              id={`supplier-material-${line.id}`}
+              key={line.id}
+              className="grid gap-2 px-3 py-4 transition-colors sm:grid-cols-[28px_1fr_120px_140px_120px] sm:items-center"
+              style={{
+                backgroundColor: highlighted ? "var(--color-primary-soft)" : "transparent",
+                boxShadow: highlighted ? "inset 3px 0 0 var(--color-primary)" : "none"
+              }}
+            >
+              <input type="checkbox" checked={selected.has(line.id)} onChange={() => toggleLine(line.id)} aria-label={`Seleziona ${line.description || "materiale"}`} disabled={!editable} className="h-4 w-4" />
+              <div>
+                <strong>{line.description || "Materiale"}</strong>
+                <div className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>{line.orderCode || line.sourceType || "Origine non indicata"}</div>
+              </div>
+              <span>{line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : "-"}</span>
+              <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(line.dueDate || line.requiredDate) || "Senza data"}</span>
+              <StatusBadge status={line.status} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function ContactsList({ contacts, adding, setAdding, draft, setDraft, addContact, run, busy, editable }) {

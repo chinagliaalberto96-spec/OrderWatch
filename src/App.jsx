@@ -569,6 +569,29 @@ export default function App() {
     return result;
   }
 
+  async function handleVerifyMaterialLines(lineIds) {
+    const ids = [...new Set(lineIds || [])].filter(Boolean);
+    const results = await Promise.all(
+      ids.map((id) => adapter.verifyOperationalItem({ kind: "material_line", id }))
+    );
+    await loadData({ silent: true });
+    return results;
+  }
+
+  async function handleLinkMaterialLines(lineIds, link) {
+    const ids = [...new Set(lineIds || [])].filter(Boolean);
+    const results = await Promise.all(
+      ids.map((id) => adapter.linkOperationalItem({
+        kind: "material_line",
+        id,
+        projectCode: link.projectCode || null,
+        orderCode: link.orderCode || null
+      }))
+    );
+    await loadData({ silent: true });
+    return results;
+  }
+
   async function handlePrepareCustomerConfirmation(item) {
     const result = await adapter.prepareCustomerConfirmation(item.entityId);
     await loadData({ silent: true });
@@ -710,8 +733,18 @@ export default function App() {
               supplierContacts={data.supplierContacts || []}
               materialLines={data.materialLines || []}
               orders={data.orders || []}
+              projects={data.projects || []}
               activities={data.activities || []}
+              focusSupplierId={drilldown.supplierId}
+              focusSupplierName={drilldown.supplierName}
+              focusTab={drilldown.supplierTab}
+              focusMaterialLineIds={drilldown.materialLineIds || []}
               onSupplierAction={canWriteOperationalData(sessionUser?.role) ? handleSupplierAction : null}
+              onVerifyMaterialLines={canWriteOperationalData(sessionUser?.role) ? handleVerifyMaterialLines : null}
+              onLinkMaterialLines={canWriteOperationalData(sessionUser?.role) ? handleLinkMaterialLines : null}
+              onPrepareSupplierOrder={canWriteOperationalData(sessionUser?.role) && backendModuleFlags.supplier_orders !== false && getWorkflowPolicy(settingsValue(data.settings, "workflow.traceability_mode")).allowSupplierOrderPreparation
+                ? (item) => setSupplierOrderItem(item)
+                : null}
             />
           )}
           {activeView === "contacts" && (
