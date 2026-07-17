@@ -50,7 +50,8 @@ export default function SupplierOrderDrawer({ open, item, data = {}, adapter, on
             : (item.lineItems || []).map((line) => line.entityId || line.id).filter(Boolean);
           const res = await adapter.supplierOrderAction({
             action: "prepare",
-            materialLineIds: materialLineIds.length ? materialLineIds : [item.entityId]
+            materialLineIds: materialLineIds.length ? materialLineIds : [item.entityId],
+            quoteId: item.quoteId || null
           });
           if (!cancelled) setDispatch(res.dispatch);
         }

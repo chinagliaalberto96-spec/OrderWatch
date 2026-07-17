@@ -698,6 +698,9 @@ export default function App() {
               materialLines={filteredData.materialLines || []}
               materialLineRevisions={data.materialLineRevisions || []}
               onNavigate={handleNavigate}
+              onPrepareSupplierOrder={canWriteOperationalData(sessionUser?.role) && backendModuleFlags.supplier_orders !== false && getWorkflowPolicy(settingsValue(data.settings, "workflow.traceability_mode")).allowSupplierOrderPreparation
+                ? (item) => setSupplierOrderItem(item)
+                : null}
             />
           )}
           {activeView === "projects" && (
@@ -754,7 +757,17 @@ export default function App() {
               readOnly={sessionUser?.role === "ReadOnly"}
             />
           )}
-          {activeView === "quotes" && <QuotesView data={filteredData} onNavigate={handleNavigate} />}
+          {activeView === "quotes" && (
+            <QuotesView
+              data={filteredData}
+              onNavigate={handleNavigate}
+              focusQuoteId={drilldown.quoteId}
+              onConvertQuote={canWriteOperationalData(sessionUser?.role) && backendModuleFlags.supplier_orders !== false && getWorkflowPolicy(settingsValue(data.settings, "workflow.traceability_mode")).allowSupplierOrderPreparation
+                ? (item) => setSupplierOrderItem(item)
+                : null}
+              onVerifyQuote={canWriteOperationalData(sessionUser?.role) ? handleVerifyOperationalItem : null}
+            />
+          )}
           {activeView === "receiving" && <ReceivingView adapter={adapter} readOnly={sessionUser?.role === "ReadOnly"} />}
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
           {activeView === "invoices" && <InvoicesView config={config} invoices={filteredData.invoices} />}

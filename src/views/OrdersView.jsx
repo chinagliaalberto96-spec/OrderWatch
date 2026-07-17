@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, PackageOpen, X } from "lucide-react";
+import { ArrowRight, PackageOpen, ShoppingCart, X } from "lucide-react";
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
+import OperationalRow from "../components/OperationalRow";
 import OrderDetailPanel from "../components/OrderDetailPanel";
 import StatusBadge from "../components/StatusBadge";
 import { formatDate } from "../utils/dateUtils";
@@ -12,7 +13,7 @@ import { getOrderStatus } from "../utils/statusRules";
 // richieste" quando si arriva qui dal KPI della dashboard.
 const ACTION_STATUSES = ["OVERDUE", "CRITICAL", "TO_VERIFY"];
 
-export default function OrdersView({ config, orders, materialLines = [], focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onNavigate }) {
+export default function OrdersView({ config, orders, materialLines = [], focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onNavigate, onPrepareSupplierOrder }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   // Dopo un refresh dei dati (es. update dal pannello) l'ordine selezionato
@@ -117,18 +118,25 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
               </div>
               <span className="text-sm font-semibold" style={{ color: "var(--color-warning)" }}>{materialNeeds.length} da gestire</span>
             </div>
-            <div className="mt-4 divide-y border-y" style={{ borderColor: "var(--color-border)" }}>
+            <div className="mt-4 border-y" style={{ borderColor: "var(--color-border)" }}>
               {materialNeeds.slice(0, 12).map((line) => (
-                <div key={line.id} className="grid gap-2 px-3 py-4 sm:grid-cols-[1fr_150px_130px] sm:items-center">
-                  <div className="min-w-0">
-                    <div className="font-semibold">{line.description || "Materiale da definire"}</div>
-                    <div className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
-                      {[line.projectCode, line.customerName, line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null].filter(Boolean).join(" · ") || "Richiesta da completare"}
-                    </div>
-                  </div>
-                  <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(line.requiredDate) || "Senza scadenza"}</span>
-                  <StatusBadge status={line.needsReview ? "TO_VERIFY" : "Da ordinare"} />
-                </div>
+                <OperationalRow
+                  key={line.id}
+                  title={line.description || "Materiale da definire"}
+                  subtitle={[line.projectCode, line.customerName, line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null].filter(Boolean).join(" · ") || "Richiesta da completare"}
+                  meta={formatDate(line.requiredDate) || "Senza scadenza"}
+                  status={<StatusBadge status={line.needsReview ? "TO_VERIFY" : "Da ordinare"} />}
+                  actions={onPrepareSupplierOrder ? [{
+                    label: "Crea ordine fornitore",
+                    icon: ShoppingCart,
+                    onClick: () => onPrepareSupplierOrder({
+                      kind: "material_line_selection",
+                      materialLineIds: [line.id],
+                      supplierId: line.supplierId || null,
+                      supplierName: line.supplierName || null
+                    })
+                  }] : []}
+                />
               ))}
             </div>
             {materialNeeds.length > 12 && <p className="mt-3 text-xs" style={{ color: "var(--color-text-muted)" }}>Mostrate le prime 12 richieste per urgenza.</p>}

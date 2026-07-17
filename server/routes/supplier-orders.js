@@ -132,6 +132,21 @@ async function primaryContactEmail(supplierId, organizationId) {
   return rows?.[0]?.email || null;
 }
 
+async function markQuoteConverted(quoteId, orderId, orderCode, organizationId) {
+  if (!quoteId) return;
+  const rows = await supabaseRequest(`quotes?id=eq.${encodeURIComponent(quoteId)}&${orgFilter(organizationId)}&select=id,notes&limit=1`);
+  if (!rows?.[0]) throw httpError("Preventivo da convertire non trovato.", 404);
+  await supabaseRequest(`quotes?id=eq.${encodeURIComponent(quoteId)}&${orgFilter(organizationId)}`, {
+    method: "PATCH",
+    body: {
+      status: "converted",
+      needs_review: false,
+      notes: [rows[0].notes, `Convertito manualmente dal buyer nell'ordine ${orderCode || orderId}.`].filter(Boolean).join("\n"),
+      updated_at: new Date().toISOString()
+    }
+  });
+}
+
 // FASE 2 — Preparazione: parte da una o piu' righe materiale, raggruppate per
 // fornitore. La v1 gestisce un fornitore per bozza (le righe di fornitori
 // diversi vanno preparate separatamente); il grouping avviene lato UI.
@@ -171,10 +186,16 @@ async function prepareDraft(body, organizationId) {
   // Idempotenza: se esiste gia' un dispatch attivo per queste righe/ordine, riusalo.
   if (orderId) {
     const existing = await supabaseRequest(`supplier_order_dispatches?order_id=eq.${encodeURIComponent(orderId)}&${orgFilter(organizationId)}&status=in.(draft,approved,sent,waiting_confirmation)&select=*&limit=1`);
-    if (existing?.[0]) return mapDispatch(existing[0]);
+    if (existing?.[0]) {
+      await markQuoteConverted(body.quoteId, orderId, orderCode, organizationId);
+      return mapDispatch(existing[0]);
+    }
   }
   const existingByLine = await supabaseRequest(`supplier_order_dispatches?material_line_ids=ov.{${ids.join(",")}}&${orgFilter(organizationId)}&status=in.(draft,approved)&select=*&limit=1`);
-  if (existingByLine?.[0]) return mapDispatch(existingByLine[0]);
+  if (existingByLine?.[0]) {
+    await markQuoteConverted(body.quoteId, existingByLine[0].order_id, existingByLine[0].order_code, organizationId);
+    return mapDispatch(existingByLine[0]);
+  }
 
   if (!orderCode) {
     const rpc = await supabaseRequest("rpc/next_supplier_po_code", { method: "POST", body: {} });
@@ -248,6 +269,7 @@ async function prepareDraft(body, organizationId) {
     body: payload,
     headers: { Prefer: "return=representation" }
   });
+  await markQuoteConverted(body.quoteId, orderId, orderCode, organizationId);
   return mapDispatch(created?.[0]);
 }
 

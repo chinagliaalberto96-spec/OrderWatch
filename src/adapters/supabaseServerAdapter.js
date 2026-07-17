@@ -132,7 +132,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       // La tabella documents non ha una colonna dedicata: usa la stessa
       // soglia del backend (confidence < 0.85 => revisione umana).
       needsHumanReview: row.confidence !== null && Number(row.confidence) < 0.85,
-      receivedAt: row.received_at
+      receivedAt: row.received_at,
+      sourceEmailId: row.source_email_id
     }),
     activities: (row) => ({
       id: row.id,

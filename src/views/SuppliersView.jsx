@@ -18,6 +18,7 @@ import {
   Users
 } from "lucide-react";
 import Button from "../components/Button";
+import OperationalRow from "../components/OperationalRow";
 import StatusBadge from "../components/StatusBadge";
 import { formatPercent } from "../utils/formatters";
 import { formatDate } from "../utils/dateUtils";
@@ -328,7 +329,7 @@ function SupplierProfile({
   }
 
   async function runLineAction(callback, successMessage) {
-    if (!callback || !selectedLineIds.length) return;
+    if (!callback) return;
     setBusy(true);
     setMessage("");
     try {
@@ -341,11 +342,12 @@ function SupplierProfile({
     }
   }
 
-  function prepareSelectedLines() {
-    if (!onPrepareSupplierOrder || !selectedLineIds.length) return;
+  function prepareSelectedLines(lineIds = selectedLineIds, quoteId = null) {
+    if (!onPrepareSupplierOrder || !lineIds.length) return;
     onPrepareSupplierOrder({
       kind: "material_line_selection",
-      materialLineIds: selectedLineIds,
+      materialLineIds: lineIds,
+      quoteId,
       supplierId: supplier.id,
       supplierName: supplier.name
     });
@@ -434,13 +436,13 @@ function SupplierProfile({
             busy={busy}
             editable={Boolean(onVerifyMaterialLines || onLinkMaterialLines || onPrepareSupplierOrder)}
             onPrepare={onPrepareSupplierOrder ? prepareSelectedLines : null}
-            onVerify={onVerifyMaterialLines ? () => runLineAction(
-              () => onVerifyMaterialLines(selectedLineIds),
-              `${selectedLineIds.length === 1 ? "Riga verificata" : "Righe verificate"}.`
+            onVerify={onVerifyMaterialLines ? (lineIds = selectedLineIds) => runLineAction(
+              () => onVerifyMaterialLines(lineIds),
+              `${lineIds.length === 1 ? "Riga verificata" : "Righe verificate"}.`
             ) : null}
-            onLink={onLinkMaterialLines ? () => runLineAction(
-              () => onLinkMaterialLines(selectedLineIds, linkDraft),
-              `${selectedLineIds.length === 1 ? "Riga collegata" : "Righe collegate"}.`
+            onLink={onLinkMaterialLines ? (lineIds = selectedLineIds, draft = linkDraft) => runLineAction(
+              () => onLinkMaterialLines(lineIds, draft),
+              `${lineIds.length === 1 ? "Riga collegata" : "Righe collegate"}.`
             ) : null}
           />
         )}
@@ -488,7 +490,19 @@ function Overview({ supplier, contacts }) {
 
 function OrdersList({ orders }) {
   if (!orders.length) return <EmptyState text="Nessun ordine collegato a questo fornitore." />;
-  return <div className="divide-y border-y" style={{ borderColor: "var(--color-border)" }}>{orders.map((order) => <div key={order.id} className="grid gap-2 px-3 py-4 sm:grid-cols-[150px_1fr_130px_120px] sm:items-center"><strong>{order.orderCode || "Senza codice"}</strong><span>{order.material || "Materiale non specificato"}</span><span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(order.dueDate) || "Senza data"}</span><StatusBadge status={order.status} /></div>)}</div>;
+  return (
+    <div className="border-y" style={{ borderColor: "var(--color-border)" }}>
+      {orders.map((order) => (
+        <OperationalRow
+          key={order.id}
+          title={order.orderCode || "Ordine senza codice"}
+          subtitle={order.material || "Materiale non specificato"}
+          meta={formatDate(order.dueDate) || "Senza data"}
+          status={<StatusBadge status={order.status} />}
+        />
+      ))}
+    </div>
+  );
 }
 
 function MaterialsList({
@@ -527,6 +541,11 @@ function MaterialsList({
     setLinkDraft({ projectCode: order?.projectCode || linkDraft.projectCode || "", orderCode });
   }
 
+  function selectOnly(id, openLink = false) {
+    onSelectionChange?.([id]);
+    if (openLink) setLinking(true);
+  }
+
   return (
     <div>
       {editable && selectedLineIds.length > 0 && (
@@ -537,8 +556,8 @@ function MaterialsList({
               <div className="mt-0.5 text-xs" style={{ color: "var(--color-text-muted)" }}>Le azioni vengono applicate soltanto ai materiali selezionati.</div>
             </div>
             <div className="flex flex-wrap gap-2">
-              {onPrepare && <Button onClick={onPrepare} disabled={busy}><Send className="h-4 w-4" /> Prepara ordine</Button>}
-              {onVerify && reviewCount > 0 && <Button variant="secondary" onClick={onVerify} disabled={busy}><CheckCircle2 className="h-4 w-4" /> Verifica</Button>}
+              {onPrepare && <Button onClick={() => onPrepare(selectedLineIds)} disabled={busy}><Send className="h-4 w-4" /> Prepara ordine</Button>}
+              {onVerify && reviewCount > 0 && <Button variant="secondary" onClick={() => onVerify(selectedLineIds)} disabled={busy}><CheckCircle2 className="h-4 w-4" /> Verifica</Button>}
               {onLink && <Button variant="secondary" onClick={() => setLinking(!linking)} disabled={busy}><Link2 className="h-4 w-4" /> Collega</Button>}
             </div>
           </div>
@@ -552,34 +571,47 @@ function MaterialsList({
                 <option value="">Seleziona ordine</option>
                 {openOrders.map((order) => <option key={order.id} value={order.orderCode}>{order.orderCode} - {order.supplierName || "Fornitore n.d."}</option>)}
               </select>
-              <Button onClick={onLink} disabled={busy || (!linkDraft.projectCode && !linkDraft.orderCode)}>Salva collegamento</Button>
+              <Button onClick={() => onLink(selectedLineIds, linkDraft)} disabled={busy || (!linkDraft.projectCode && !linkDraft.orderCode)}>Salva collegamento</Button>
             </div>
           )}
         </div>
       )}
 
-      <div className="divide-y border-y" style={{ borderColor: "var(--color-border)" }}>
+      <div className="border-y" style={{ borderColor: "var(--color-border)" }}>
         {lines.map((line) => {
           const highlighted = focused.has(line.id);
+          const isQuote = line.sourceType === "quote" || /preventivo/i.test(String(line.status || ""));
+          const needsReview = line.needsReview || String(line.status || "").toLowerCase() === "needs_review";
+          const actions = editable ? [
+            onPrepare && {
+              label: isQuote ? "Converti in ordine" : "Prepara ordine",
+              icon: Send,
+              onClick: () => onPrepare([line.id])
+            },
+            onLink && {
+              label: "Collega a lavoro o ordine",
+              icon: Link2,
+              onClick: () => selectOnly(line.id, true)
+            },
+            onVerify && needsReview && {
+              label: "Segna verificata",
+              icon: CheckCircle2,
+              onClick: () => onVerify([line.id])
+            }
+          ] : [];
           return (
-            <div
-              id={`supplier-material-${line.id}`}
+            <OperationalRow
               key={line.id}
-              className="grid gap-2 px-3 py-4 transition-colors sm:grid-cols-[28px_1fr_120px_140px_120px] sm:items-center"
-              style={{
-                backgroundColor: highlighted ? "var(--color-primary-soft)" : "transparent",
-                boxShadow: highlighted ? "inset 3px 0 0 var(--color-primary)" : "none"
-              }}
-            >
-              <input type="checkbox" checked={selected.has(line.id)} onChange={() => toggleLine(line.id)} aria-label={`Seleziona ${line.description || "materiale"}`} disabled={!editable} className="h-4 w-4" />
-              <div>
-                <strong>{line.description || "Materiale"}</strong>
-                <div className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>{line.orderCode || line.sourceType || "Origine non indicata"}</div>
-              </div>
-              <span>{line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : "-"}</span>
-              <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>{formatDate(line.dueDate || line.requiredDate) || "Senza data"}</span>
-              <StatusBadge status={line.status} />
-            </div>
+              rowId={`supplier-material-${line.id}`}
+              title={line.description || "Materiale"}
+              subtitle={[line.orderCode || line.sourceType || "Origine non indicata", line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null].filter(Boolean).join(" · ")}
+              meta={formatDate(line.dueDate || line.requiredDate) || "Senza data"}
+              status={<StatusBadge status={line.status} />}
+              selected={selected.has(line.id)}
+              highlighted={highlighted}
+              onSelect={editable ? () => toggleLine(line.id) : null}
+              actions={actions}
+            />
           );
         })}
       </div>

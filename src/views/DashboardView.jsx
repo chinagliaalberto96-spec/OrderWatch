@@ -75,6 +75,7 @@ function contextForItem(item) {
   if (item.kind === "operational_action") {
     return { projectCode: item.projectCode, billingItemId: item.sourceEntityId };
   }
+  if (item.kind === "quote") return { quoteId: item.entityId };
   if (item.kind === "supplier_material_group" && !item.orderCode) {
     const lines = item.lineItems || [];
     return {

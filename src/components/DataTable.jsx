@@ -9,7 +9,7 @@ export default function DataTable({ columns, rows, renderCell, onRowClick }) {
         <thead style={{ backgroundColor: "var(--color-muted)" }}>
           <tr>
             {columns.map((column) => (
-              <th key={column.key} className="border-b px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
+              <th key={column.key} className="border-b px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wide" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>
                 {column.label}
               </th>
             ))}
@@ -31,7 +31,7 @@ export default function DataTable({ columns, rows, renderCell, onRowClick }) {
               onClick={() => onRowClick?.(row)}
             >
               {columns.map((column) => (
-                <td key={column.key} className="border-b px-3 py-3 align-middle" style={{ borderColor: "var(--color-border)" }}>
+                <td key={column.key} className="border-b px-3 py-2.5 align-middle" style={{ borderColor: "var(--color-border)" }}>
                   {renderCell ? renderCell(row, column.key) : row[column.key]}
                 </td>
               ))}
