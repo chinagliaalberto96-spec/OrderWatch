@@ -771,7 +771,7 @@ export default function App() {
           {activeView === "receiving" && <ReceivingView adapter={adapter} readOnly={sessionUser?.role === "ReadOnly"} />}
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
           {activeView === "invoices" && <InvoicesView config={config} invoices={filteredData.invoices} />}
-          {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} />}
+          {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} focusEmailId={drilldown.emailId} />}
           {activeView === "reminders" && <NotificationsView config={config} data={filteredData} />}
           {activeView === "settings" && (
             <SettingsView

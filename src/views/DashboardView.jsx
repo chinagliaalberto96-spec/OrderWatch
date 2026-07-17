@@ -4,6 +4,7 @@ import { daysFromToday, formatDate } from "../utils/dateUtils";
 import { getOrderStatus } from "../utils/statusRules";
 import { getWorkflowMode, getWorkflowPolicy } from "../config/workflowModes";
 import { groupOperationalItemsByCounterparty } from "../utils/operationalGrouping";
+import OperationalRow from "../components/OperationalRow";
 
 // Home "Oggi": la coda operativa E' la pagina. Il buyer deve capire in 10
 // secondi cosa fare adesso. Niente KPI/grafici come protagonisti: solo una
@@ -65,9 +66,14 @@ function viewForItem(item) {
   if (item.kind === "operational_action") return "contract_watch";
   if (item.kind === "supplier_material_group") return item.orderCode ? "orders" : "suppliers";
   if (item.kind === "quote") return "quotes";
+  if ((item.kind === "invoice" || item.kind === "delivery_note") && item.sourceEmailId) return "imports";
   if (item.kind === "invoice" || item.kind === "delivery_note") return "documents";
   if (item.kind === "processed_email") return "imports";
-  if (item.kind === "material_line" && !item.orderCode) return "quotes";
+  if (item.kind === "material_line" && !item.orderCode) {
+    if (item.supplierId || item.supplierName) return "suppliers";
+    if (item.sourceEmailId) return "imports";
+    return "quotes";
+  }
   return "orders";
 }
 
@@ -76,6 +82,17 @@ function contextForItem(item) {
     return { projectCode: item.projectCode, billingItemId: item.sourceEntityId };
   }
   if (item.kind === "quote") return { quoteId: item.entityId };
+  if (item.kind === "material_line" && !item.orderCode && (item.supplierId || item.supplierName)) {
+    return {
+      supplierId: item.supplierId || null,
+      supplierName: item.supplierName || null,
+      supplierTab: "materials",
+      materialLineIds: [item.entityId].filter(Boolean)
+    };
+  }
+  if (item.sourceEmailId && ["material_line", "delivery_note", "invoice"].includes(item.kind)) {
+    return { emailId: item.sourceEmailId };
+  }
   if (item.kind === "supplier_material_group" && !item.orderCode) {
     const lines = item.lineItems || [];
     return {
@@ -108,6 +125,7 @@ export default function DashboardView({
   const [actionState, setActionState] = useState({ loading: false, error: null, done: false });
   const [linkDraft, setLinkDraft] = useState({ projectCode: "", orderCode: "" });
   const [confirmationDraft, setConfirmationDraft] = useState(null);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   const rawQueue = data.operationalQueue || [];
   const traceabilityMode = (data.settings || []).find((setting) => setting.settingKey === "workflow.traceability_mode")?.value || "required_link";
@@ -364,30 +382,42 @@ export default function DashboardView({
       )}
 
       {assistedMode && suggestions.length > 0 && (
-        <section className="rounded-lg border bg-white p-4 shadow-soft" style={{ borderColor: "var(--color-border)" }}>
-          <div className="flex items-start gap-3">
+        <section className="overflow-hidden rounded-lg border bg-white shadow-soft" style={{ borderColor: "var(--color-border)" }}>
+          <button
+            type="button"
+            onClick={() => setSuggestionsOpen((value) => !value)}
+            className="flex w-full items-center gap-3 p-4 text-left hover:bg-[color:var(--color-muted)]"
+          >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--color-accent) 10%, white)", color: "var(--color-accent)" }}>
               <Lightbulb className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 className="text-[14px] font-semibold">{suggestions.length} {suggestions.length === 1 ? "suggerimento facoltativo" : "suggerimenti facoltativi"}</h2>
-              <p className="mt-0.5 text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>Non sono attività obbligatorie e non aumentano il contatore di Oggi.</p>
-              <div className="mt-3 grid gap-2 md:grid-cols-2">
-                {suggestions.slice(0, 6).map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => navigate(viewForItem(item), contextForItem(item))}
-                    className="flex min-w-0 items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-[color:var(--color-muted)]"
-                    style={{ borderColor: "var(--color-border)" }}
-                  >
-                    <span className="min-w-0 flex-1 truncate font-medium">{item.title}</span>
-                    <span className="shrink-0 text-xs" style={{ color: "var(--color-text-muted)" }}>{item.subtitle}</span>
-                  </button>
-                ))}
-              </div>
+              <h2 className="text-[14px] font-semibold">{suggestions.length} {suggestions.length === 1 ? "collegamento facoltativo" : "collegamenti facoltativi"}</h2>
+              <p className="mt-0.5 text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>
+                Dati riconosciuti correttamente ma non ancora associati a un lavoro o ordine.
+              </p>
             </div>
-          </div>
+            <ChevronDown className="h-4 w-4 shrink-0 transition-transform" style={{ color: "var(--color-text-muted)", transform: suggestionsOpen ? "rotate(180deg)" : "none" }} />
+          </button>
+          {suggestionsOpen && (
+            <div className="max-h-[480px] overflow-y-auto border-t" style={{ borderColor: "var(--color-border)" }}>
+              {suggestions.map((item) => (
+                <OperationalRow
+                  key={item.id}
+                  title={item.title}
+                  subtitle={[item.subtitle, item.detail].filter(Boolean).join(" · ")}
+                  meta={item.dueDate ? formatDate(item.dueDate) : "Senza data"}
+                  status={<span className="rounded-full px-2 py-1 text-[10.5px] font-semibold" style={{ backgroundColor: "var(--color-muted)", color: "var(--color-text-muted)" }}>Da collegare</span>}
+                  onOpen={() => openItem(item)}
+                  actions={[{
+                    label: "Collega a lavoro o ordine",
+                    icon: ArrowRight,
+                    onClick: () => openItem(item)
+                  }]}
+                />
+              ))}
+            </div>
+          )}
         </section>
       )}
 

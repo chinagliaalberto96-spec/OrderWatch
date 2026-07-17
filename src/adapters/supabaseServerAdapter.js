@@ -953,11 +953,20 @@ export function buildOperationalSuggestions({ materialLines = [], deliveryNotes 
       id: `suggestion-material-${line.id}`,
       kind: "material_line",
       entityId: line.id,
+      priority: "low",
+      status: "suggested_link",
       title: line.description || "Materiale senza collegamento",
       subtitle: line.supplierName || line.customerName || "",
       detail: "Se utile, puoi collegarlo a una commessa o a un ordine. Non e' obbligatorio.",
+      actionLabel: "Collega a lavoro o ordine",
+      supplierId: line.supplierId,
       supplierName: line.supplierName,
       customerName: line.customerName,
+      sourceEmailId: line.sourceEmailId,
+      sourceType: line.sourceType,
+      itemCode: line.itemCode,
+      quantity: line.quantity,
+      unit: line.unit,
       dueDate: line.dueDate || line.requiredDate,
       date: line.createdAt
     }));
@@ -969,10 +978,14 @@ export function buildOperationalSuggestions({ materialLines = [], deliveryNotes 
       id: `suggestion-ddt-${item.id}`,
       kind: "delivery_note",
       entityId: item.id,
+      priority: "low",
+      status: "suggested_link",
       title: item.ddtNumber || "DDT senza collegamento",
       subtitle: item.supplierName || "",
       detail: "Collegamento facoltativo a ordine o commessa.",
+      actionLabel: "Collega DDT",
       supplierName: item.supplierName,
+      sourceEmailId: item.sourceEmailId,
       date: item.createdAt
     }))
   ];

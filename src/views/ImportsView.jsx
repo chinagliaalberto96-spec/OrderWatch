@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
 import { formatDate } from "../utils/dateUtils";
@@ -30,7 +31,7 @@ function ImportBadge({ value, type = "status" }) {
   );
 }
 
-export default function ImportsView({ config, processedEmails }) {
+export default function ImportsView({ config, processedEmails, focusEmailId }) {
   const rows = [...(processedEmails || [])].sort((a, b) => {
     const aDate = a.receivedAt ? new Date(a.receivedAt).getTime() : 0;
     const bDate = b.receivedAt ? new Date(b.receivedAt).getTime() : 0;
@@ -59,6 +60,14 @@ export default function ImportsView({ config, processedEmails }) {
   const processingCount = rows.filter((row) => row.status?.trim() === "Processing").length;
   const errorCount = rows.filter((row) => row.status === "Error").length;
 
+  useEffect(() => {
+    if (!focusEmailId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`processed-email-${focusEmailId}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusEmailId, rows.length]);
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
@@ -86,7 +95,13 @@ export default function ImportsView({ config, processedEmails }) {
         </Card>
       </div>
       <Card title={config.terminology.importsPlural}>
-        <DataTable columns={columns} rows={rows} renderCell={renderCell} />
+        <DataTable
+          columns={columns}
+          rows={rows}
+          renderCell={renderCell}
+          getRowId={(row) => `processed-email-${row.id}`}
+          isRowHighlighted={(row) => row.id === focusEmailId}
+        />
       </Card>
     </div>
   );

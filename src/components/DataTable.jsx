@@ -1,6 +1,6 @@
 import EmptyState from "./EmptyState";
 
-export default function DataTable({ columns, rows, renderCell, onRowClick }) {
+export default function DataTable({ columns, rows, renderCell, onRowClick, getRowId, isRowHighlighted }) {
   if (!rows?.length) return <EmptyState />;
 
   return (
@@ -19,14 +19,19 @@ export default function DataTable({ columns, rows, renderCell, onRowClick }) {
           {rows.map((row, index) => (
             <tr
               key={row.id}
+              id={getRowId?.(row)}
               className={`transition-colors ${onRowClick ? "cursor-pointer" : ""}`}
-              style={{ backgroundColor: index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)" }}
+              style={isRowHighlighted?.(row)
+                ? { backgroundColor: "var(--color-primary-soft)", boxShadow: "inset 3px 0 0 var(--color-primary)" }
+                : { backgroundColor: index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)" }}
               onMouseEnter={(event) => {
                 if (onRowClick) event.currentTarget.style.backgroundColor = "var(--color-primary-soft)";
               }}
               onMouseLeave={(event) => {
                 event.currentTarget.style.backgroundColor =
-                  index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)";
+                  isRowHighlighted?.(row)
+                    ? "var(--color-primary-soft)"
+                    : index % 2 === 1 ? "color-mix(in srgb, var(--color-muted) 55%, white)" : "var(--color-card)";
               }}
               onClick={() => onRowClick?.(row)}
             >
