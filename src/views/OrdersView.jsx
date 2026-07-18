@@ -8,6 +8,7 @@ import StatusBadge from "../components/StatusBadge";
 import { formatDate } from "../utils/dateUtils";
 import { formatNumber, humanizeColumn } from "../utils/formatters";
 import { getOrderStatus } from "../utils/statusRules";
+import { canPrepareSupplierOrderFromLine, isProcurementRequirement } from "../utils/procurement";
 
 // Stati che richiedono un intervento del buyer: usati dal filtro "azioni
 // richieste" quando si arriva qui dal KPI della dashboard.
@@ -51,9 +52,9 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
     label: humanizeColumn(key, config.terminology)
   }));
 
-  const materialNeeds = useMemo(
+  const procurementNeeds = useMemo(
     () => materialLines
-      .filter((line) => line.sourceType === "customer_request")
+      .filter(isProcurementRequirement)
       .filter((line) => !line.orderId && !line.orderCode)
       .filter((line) => !/ricevut|arrivat|consegnat|complet|annullat/i.test(String(line.status || "")))
       .sort((a, b) => new Date(a.requiredDate || "9999-12-31") - new Date(b.requiredDate || "9999-12-31")),
@@ -107,26 +108,26 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
           <OrdersEmptyState filtered={presetFilter === "actions"} onNavigate={onNavigate} />
         )}
 
-        {!presetFilter && materialNeeds.length > 0 && (
+        {!presetFilter && procurementNeeds.length > 0 && (
           <section className="mt-8 border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Materiali ancora da ordinare</h2>
+                <h2 className="text-lg font-semibold">Fabbisogni di acquisto</h2>
                 <p className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
-                  Richieste cliente gia' riconosciute, ma non ancora collegate a un ordine fornitore.
+                  Solo materiali e servizi esplicitamente definiti come acquisti, separati dai prodotti richiesti dal cliente.
                 </p>
               </div>
-              <span className="text-sm font-semibold" style={{ color: "var(--color-warning)" }}>{materialNeeds.length} da gestire</span>
+              <span className="text-sm font-semibold" style={{ color: "var(--color-warning)" }}>{procurementNeeds.length} da gestire</span>
             </div>
             <div className="mt-4 border-y" style={{ borderColor: "var(--color-border)" }}>
-              {materialNeeds.slice(0, 12).map((line) => (
+              {procurementNeeds.slice(0, 12).map((line) => (
                 <OperationalRow
                   key={line.id}
                   title={line.description || "Materiale da definire"}
                   subtitle={[line.projectCode, line.customerName, line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null].filter(Boolean).join(" · ") || "Richiesta da completare"}
                   meta={formatDate(line.requiredDate) || "Senza scadenza"}
                   status={<StatusBadge status={line.needsReview ? "TO_VERIFY" : "Da ordinare"} />}
-                  actions={onPrepareSupplierOrder ? [{
+                  actions={onPrepareSupplierOrder && canPrepareSupplierOrderFromLine(line) ? [{
                     label: "Crea ordine fornitore",
                     icon: ShoppingCart,
                     onClick: () => onPrepareSupplierOrder({
@@ -139,7 +140,7 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
                 />
               ))}
             </div>
-            {materialNeeds.length > 12 && <p className="mt-3 text-xs" style={{ color: "var(--color-text-muted)" }}>Mostrate le prime 12 richieste per urgenza.</p>}
+            {procurementNeeds.length > 12 && <p className="mt-3 text-xs" style={{ color: "var(--color-text-muted)" }}>Mostrati i primi 12 fabbisogni per urgenza.</p>}
           </section>
         )}
       </main>
@@ -163,7 +164,7 @@ function OrdersEmptyState({ filtered, onNavigate }) {
       <p className="mx-auto mt-2 max-w-xl text-sm" style={{ color: "var(--color-text-muted)" }}>
         {filtered
           ? "Gli ordini aperti non presentano scadenze o verifiche urgenti."
-          : "Gli ordini compariranno quando OrderWatch riconosce una conferma fornitore o quando il buyer prepara un ordine dai materiali richiesti."}
+          : "Gli ordini compariranno quando OrderWatch riconosce una conferma fornitore o quando il buyer prepara un ordine da un fabbisogno di acquisto approvato."}
       </p>
       {!filtered && onNavigate && (
         <button type="button" onClick={() => onNavigate("dashboard")} className="mt-5 inline-flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--color-primary)" }}>

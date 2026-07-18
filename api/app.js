@@ -7,6 +7,7 @@ import mailboxesHandler from "../server/routes/mailboxes.js";
 import operationalActionsHandler from "../server/routes/operational-actions.js";
 import ordersHandler from "../server/routes/orders.js";
 import projectsHandler from "../server/routes/projects.js";
+import procurementRequirementsHandler from "../server/routes/procurement-requirements.js";
 import receivingHandler from "../server/routes/receiving.js";
 import supplierOrdersHandler from "../server/routes/supplier-orders.js";
 import suppliersHandler from "../server/routes/suppliers.js";
@@ -21,6 +22,7 @@ const handlers = {
   "operational-actions": operationalActionsHandler,
   orders: ordersHandler,
   projects: projectsHandler,
+  "procurement-requirements": procurementRequirementsHandler,
   receiving: receivingHandler,
   "supplier-orders": supplierOrdersHandler,
   suppliers: suppliersHandler

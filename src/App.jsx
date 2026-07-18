@@ -420,6 +420,12 @@ export default function App() {
     return result;
   }
 
+  async function handleProcurementRequirement(payload) {
+    const result = await adapter.procurementRequirementAction(payload);
+    await loadData({ silent: true });
+    return result.requirement || result;
+  }
+
   async function handleSaveContractProject(fields) {
     const result = await adapter.saveContractProject(fields);
     await loadData({ silent: true });
@@ -725,6 +731,7 @@ export default function App() {
               orders={filteredData.orders || []}
               activities={data.activities || []}
               onUpdateProject={canWriteOperationalData(sessionUser?.role) ? handleUpdateProject : null}
+              onCreateProcurementRequirement={canWriteOperationalData(sessionUser?.role) ? handleProcurementRequirement : null}
             />
           )}
           {activeView === "contract_watch" && (

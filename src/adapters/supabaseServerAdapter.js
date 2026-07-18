@@ -1109,7 +1109,7 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
     // Quote e DDT hanno gia' una propria entita' operativa. Mostrarne anche
     // ogni riga come attivita' separata produrrebbe due verita' per lo stesso
     // fatto (preventivo + righe preventivo, DDT + righe DDT).
-    .filter((line) => ["project_requirement", "purchase_order_line"].includes(line.entityKind))
+    .filter((line) => ["project_requirement", "procurement_requirement", "purchase_order_line"].includes(line.entityKind))
     .filter((line) => isOperationalArtifactSource(processedEmailById.get(line.sourceEmailId)?.classificationType))
     .flatMap((line) => {
       const exposeConfirmation = line.sourceType === "customer_request" && line.sourceEmailId && !customerEmailSeen.has(line.sourceEmailId);
@@ -1124,7 +1124,7 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
     });
   const latestMaterialAtByConversation = new Map();
   for (const line of materialLines.filter((item) =>
-    ["project_requirement", "purchase_order_line"].includes(item.entityKind) &&
+    ["project_requirement", "procurement_requirement", "purchase_order_line"].includes(item.entityKind) &&
     isOperationalArtifactSource(item.sourceClassificationType)
   )) {
     const key = partyConversationKey(line);
@@ -1148,7 +1148,7 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
   const materialConversationKeys = new Set(
     materialLines
       .filter((line) =>
-        ["project_requirement", "purchase_order_line"].includes(line.entityKind) &&
+        ["project_requirement", "procurement_requirement", "purchase_order_line"].includes(line.entityKind) &&
         isOperationalArtifactSource(line.sourceClassificationType)
       )
       .map(partyConversationKey)
@@ -1421,29 +1421,37 @@ function materialLineToOperationalItems(line, confirmation, exposeConfirmation =
   const needsReview = (Boolean(line.needsReview) || line.status === "Da verificare") && !legacyLinkOnlyReview;
   const confirmationPending = exposeConfirmation && confirmation?.status !== "sent" && confirmation?.status !== "cancelled";
   const confirmationFailed = confirmationPending && confirmation?.status === "failed";
-  // FASE 2 — la riga puo' diventare un ordine verso il fornitore se ha un
-  // fornitore e non e' gia' coperta da un dispatch attivo.
-  const canPrepareSupplierOrder = Boolean(line.supplierName) && !linesWithActiveDispatch.has(line.id);
+  // Solo un fabbisogno di acquisto esplicito e approvato puo' generare un
+  // ordine fornitore. Una richiesta cliente non e' una distinta materiali.
+  const canPrepareSupplierOrder = line.entityKind === "procurement_requirement"
+    && line.status === "Da ordinare"
+    && !line.needsReview
+    && Boolean(line.description && Number(line.quantity) > 0 && line.unit)
+    && !linesWithActiveDispatch.has(line.id);
+  const procurementPending = line.entityKind === "procurement_requirement"
+    && line.status === "Da ordinare";
 
-  if (!linkActionable && !needsReview && !dateState?.isActionable && !confirmationPending) return [];
+  if (!linkActionable && !needsReview && !dateState?.isActionable && !confirmationPending && !procurementPending) return [];
 
   return [{
     canPrepareSupplierOrder,
     id: `material-line-${line.id}`,
     kind: "material_line",
+    entityKind: line.entityKind,
     entityId: line.id,
-    priority: confirmationFailed ? "urgent" : needsReview || linkActionable ? "high" : confirmationPending ? "medium" : dateState.priority,
-    status: needsReview ? "needs_review" : linkActionable ? "needs_link" : confirmationFailed ? "confirmation_failed" : confirmationPending ? "confirmation_pending" : dateState.status,
+    priority: confirmationFailed ? "urgent" : needsReview || linkActionable ? "high" : confirmationPending || procurementPending ? "medium" : dateState.priority,
+    status: needsReview ? "needs_review" : linkActionable ? "needs_link" : confirmationFailed ? "confirmation_failed" : confirmationPending ? "confirmation_pending" : procurementPending ? "procurement_pending" : dateState.status,
     title: line.description || "Materiale da verificare",
     subtitle: [line.supplierName || line.customerName, line.projectCode || line.orderCode].filter(Boolean).join(" - "),
     detail: [
       line.quantity ? `Quantita': ${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null,
       linkActionable ? "Da associare a lavoro/ordine" : null,
       needsReview ? "Richiede verifica" : null,
+      procurementPending ? "Fabbisogno approvato da ordinare" : null,
       confirmationPending ? (confirmation ? "Conferma cliente pronta da approvare" : "Conferma ricezione cliente da preparare") : null,
       dateState?.label ? dateState.label.replace(/\.$/, "") : null
     ].filter(Boolean).join(" · "),
-    actionLabel: needsReview || linkActionable ? "Associa/verifica" : confirmationPending ? (confirmation ? "Rivedi conferma cliente" : "Prepara conferma cliente") : "Controlla consegna",
+    actionLabel: needsReview || linkActionable ? "Associa/verifica" : confirmationPending ? (confirmation ? "Rivedi conferma cliente" : "Prepara conferma cliente") : procurementPending ? "Prepara ordine fornitore" : "Controlla consegna",
     dueDate,
     projectCode: line.projectCode,
     orderCode: line.orderCode,

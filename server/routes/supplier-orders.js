@@ -28,6 +28,30 @@ function httpError(message, statusCode = 400) {
   return error;
 }
 
+export function assertOrderableCanonicalLines(lines) {
+  const customerRequirements = lines.filter((line) => line.entity_kind === "project_requirement");
+  if (customerRequirements.length) {
+    throw httpError("La richiesta cliente descrive il prodotto finito. Definisci prima il materiale o servizio da acquistare nel lavoro.", 409);
+  }
+
+  const unsupported = lines.filter((line) => ![
+    "procurement_requirement",
+    "quote_line",
+    "purchase_order_line"
+  ].includes(line.entity_kind));
+  if (unsupported.length) {
+    throw httpError("Un documento o una riga non acquistabile non puo' diventare un ordine fornitore.", 409);
+  }
+
+  const invalidProcurement = lines.filter((line) =>
+    line.entity_kind === "procurement_requirement"
+    && (line.needs_review || line.status !== "Da ordinare" || !clean(line.description) || !clean(line.quantity) || !clean(line.unit))
+  );
+  if (invalidProcurement.length) {
+    throw httpError("Completa e approva tutti i fabbisogni prima di preparare l'ordine fornitore.", 409);
+  }
+}
+
 function mapDispatch(row) {
   if (!row) return null;
   return {
@@ -148,14 +172,7 @@ async function markQuoteConverted(quoteId, orderId, orderCode, organizationId) {
 }
 
 async function attachCanonicalLinesToOrder(lines, orderId, organizationId) {
-  const unsupported = lines.filter((line) => ![
-    "project_requirement",
-    "quote_line",
-    "purchase_order_line"
-  ].includes(line.entity_kind));
-  if (unsupported.length) {
-    throw httpError("Un DDT o una riga non ordinabile non puo' essere convertito in ordine fornitore.", 409);
-  }
+  assertOrderableCanonicalLines(lines);
 
   const existing = await supabaseRequest(`purchase_order_lines?order_id=eq.${encodeURIComponent(orderId)}&${orgFilter(organizationId)}&select=*&order=line_number.asc`);
   let nextLineNumber = (existing || []).reduce((max, line) => Math.max(max, Number(line.line_number) || 0), 0) + 1;
@@ -173,7 +190,7 @@ async function attachCanonicalLinesToOrder(lines, orderId, organizationId) {
     }
 
     const sourceTable = {
-      project_requirement: "project_requirements",
+      procurement_requirement: "procurement_requirements",
       quote_line: "quote_lines"
     }[line.entity_kind];
     const sourceRows = sourceTable
@@ -181,7 +198,11 @@ async function attachCanonicalLinesToOrder(lines, orderId, organizationId) {
       : [];
     const source = sourceRows?.[0] || line;
 
-    let purchaseLine = line.canonical_key ? byCanonicalKey.get(line.canonical_key) : null;
+    // Ogni fabbisogno mantiene una riga ordine propria. In questo modo due
+    // commesse che richiedono lo stesso materiale non perdono la tracciabilita'.
+    let purchaseLine = line.entity_kind === "procurement_requirement"
+      ? null
+      : line.canonical_key ? byCanonicalKey.get(line.canonical_key) : null;
     if (
       purchaseLine
       && purchaseLine.source_email_id
@@ -238,10 +259,19 @@ async function attachCanonicalLinesToOrder(lines, orderId, organizationId) {
       });
     }
 
-    if (line.entity_kind === "project_requirement") {
-      await supabaseRequest(`project_requirements?id=eq.${encodeURIComponent(line.id)}&${orgFilter(organizationId)}`, {
+    if (line.entity_kind === "procurement_requirement") {
+      await supabaseRequest("procurement_order_allocations?on_conflict=organization_id,procurement_requirement_id,purchase_order_line_id", {
+        method: "POST",
+        body: withOrg({
+          procurement_requirement_id: line.id,
+          purchase_order_line_id: purchaseLine.id,
+          allocated_quantity: line.remaining_quantity || line.quantity || null
+        }, organizationId),
+        headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }
+      });
+      await supabaseRequest(`procurement_requirements?id=eq.${encodeURIComponent(line.id)}&${orgFilter(organizationId)}`, {
         method: "PATCH",
-        body: { order_id: orderId, status: "ordered", needs_review: false, updated_at: new Date().toISOString() }
+        body: { status: "ordered", needs_review: false, updated_at: new Date().toISOString() }
       });
     }
   }
@@ -262,6 +292,8 @@ async function prepareDraft(body, organizationId) {
   const idList = ids.map((id) => `"${String(id)}"`).join(",");
   const lines = await supabaseRequest(`canonical_operational_lines?id=in.(${idList})&${orgFilter(organizationId)}&select=*&order=created_at.asc`);
   if (!lines?.length) throw httpError("Righe materiale non trovate.", 404);
+
+  assertOrderableCanonicalLines(lines);
 
   // Un solo fornitore per bozza
   const supplierIds = [...new Set(lines.map((l) => l.supplier_id).filter(Boolean))];

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, ShoppingCart, X } from "lucide-react";
+import { CheckCircle2, Clock3, Plus, ShoppingCart, X } from "lucide-react";
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
 import StatusBadge from "../components/StatusBadge";
 import Button from "../components/Button";
 import { formatDate } from "../utils/dateUtils";
 import { formatNumber } from "../utils/formatters";
+import { splitProjectOperationalLines } from "../utils/procurement";
 
 const PROJECT_STATUSES = ["Preventivo", "Aperto", "In produzione", "Concluso", "Annullato"];
 
@@ -49,7 +50,7 @@ function historicalSuppliers(line, allLines, projectCode) {
   return [...new Set(suppliers)].slice(0, 3);
 }
 
-export default function ProjectsView({ config, projects, materialLines = [], orders = [], activities = [], onUpdateProject }) {
+export default function ProjectsView({ config, projects, materialLines = [], orders = [], activities = [], onUpdateProject, onCreateProcurementRequirement }) {
   const [selected, setSelected] = useState(null);
 
   // Riaggancia il progetto selezionato dopo un refresh dati (es. dopo update).
@@ -61,18 +62,20 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
 
   const projectRows = useMemo(() => projects.map((project) => {
     const linkedLines = materialLines.filter((line) => line.projectId === project.id || line.projectCode === project.projectCode);
+    const { customerRequirements, procurementRequirements } = splitProjectOperationalLines(linkedLines);
     const linkedOrders = orders.filter((order) => order.projectCode === project.projectCode);
-    const pendingLines = linkedLines.filter((line) => procurementState(line, linkedOrders).label !== "Arrivato");
+    const pendingLines = procurementRequirements.filter((line) => procurementState(line, linkedOrders).label !== "Arrivato");
     const criticalLines = pendingLines.filter((line) => {
       const due = line.requiredDate || line.dueDate;
       return line.needsReview || (due && due < new Date().toISOString().slice(0, 10));
     });
     return {
       ...project,
-      materialCount: linkedLines.length,
+      customerRequirementCount: customerRequirements.length,
+      procurementCount: procurementRequirements.length,
       pendingMaterialCount: pendingLines.length,
       linkedOrderCount: linkedOrders.length,
-      operationalRisk: !linkedLines.length ? "Dati mancanti" : criticalLines.length ? "A rischio" : pendingLines.length ? "Da seguire" : "Sotto controllo"
+      operationalRisk: !customerRequirements.length ? "Dati mancanti" : criticalLines.length ? "A rischio" : pendingLines.length ? "Da seguire" : "Sotto controllo"
     };
   }), [projects, materialLines, orders]);
 
@@ -80,7 +83,8 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
     { key: "projectCode", label: config.terminology.projectSingular },
     { key: "customer", label: config.terminology.customer },
     { key: "status", label: "Stato" },
-    { key: "materialCount", label: "Materiali" },
+    { key: "customerRequirementCount", label: "Richieste cliente" },
+    { key: "procurementCount", label: "Fabbisogni" },
     { key: "operationalRisk", label: "Situazione" },
     { key: "dueDate", label: config.terminology.dueDate }
   ];
@@ -95,7 +99,8 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
             onRowClick={setSelected}
             renderCell={(row, key) => {
               if (key === "status") return <StatusBadge status={row.status} />;
-              if (key === "materialCount") return row.materialCount ? `${row.pendingMaterialCount}/${row.materialCount} da completare` : "Nessun dato";
+              if (key === "customerRequirementCount") return row.customerRequirementCount || "Nessun dato";
+              if (key === "procurementCount") return row.procurementCount ? `${row.pendingMaterialCount}/${row.procurementCount} da completare` : "Nessuno definito";
               if (key === "operationalRisk") return <OperationalRiskBadge value={row.operationalRisk} />;
               if (key === "dueDate") return formatDate(row[key]);
               return row[key];
@@ -111,6 +116,7 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
         activities={activities}
         onClose={() => setSelected(null)}
         onUpdateProject={onUpdateProject}
+        onCreateProcurementRequirement={onCreateProcurementRequirement}
       />
     </div>
   );
@@ -131,20 +137,26 @@ function OperationalRiskBadge({ value }) {
   );
 }
 
-function ProjectDetailPanel({ project, terminology, materialLines, orders, activities, onClose, onUpdateProject }) {
+function ProjectDetailPanel({ project, terminology, materialLines, orders, activities, onClose, onUpdateProject, onCreateProcurementRequirement }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [procurementDraft, setProcurementDraft] = useState(null);
 
   useEffect(() => {
     setEditing(false);
+    setProcurementDraft(null);
     setMessage("");
   }, [project?.id]);
 
   const linkedLines = useMemo(
     () => (project ? materialLines.filter((line) => line.projectCode === project.projectCode) : []),
     [materialLines, project]
+  );
+  const { customerRequirements, procurementRequirements } = useMemo(
+    () => splitProjectOperationalLines(linkedLines),
+    [linkedLines]
   );
   const linkedOrders = useMemo(
     () => (project ? orders.filter((order) => order.projectCode === project.projectCode) : []),
@@ -189,6 +201,37 @@ function ProjectDetailPanel({ project, terminology, materialLines, orders, activ
     }
   }
 
+  function startProcurementDraft(source) {
+    setProcurementDraft({
+      sourceProjectRequirementId: source.id,
+      sourceDescription: source.description || "Richiesta cliente",
+      description: "",
+      quantity: "",
+      unit: "",
+      requiredDate: source.requiredDate || project.dueDate || ""
+    });
+    setMessage("");
+  }
+
+  async function saveProcurementDraft() {
+    if (!onCreateProcurementRequirement || !procurementDraft) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await onCreateProcurementRequirement({
+        action: "create",
+        ...procurementDraft,
+        approve: true
+      });
+      setProcurementDraft(null);
+      setMessage("Fabbisogno di acquisto creato e approvato.");
+    } catch (error) {
+      setMessage(`Errore: ${error.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <aside className="w-full shrink-0 border-t bg-white xl:w-96 xl:border-l xl:border-t-0" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}>
       <div className="flex h-14 items-center justify-between border-b px-4" style={{ borderColor: "var(--color-border)" }}>
@@ -212,7 +255,8 @@ function ProjectDetailPanel({ project, terminology, materialLines, orders, activ
             <Row label={terminology.owner} value={project.owner} />
             <Row label={terminology.dueDate} value={formatDate(project.dueDate)} />
             <Row label="Ordini collegati" value={linkedOrders.length || "Nessuno"} />
-            <Row label="Materiali collegati" value={linkedLines.length || "Nessun dato"} />
+            <Row label="Richieste cliente" value={customerRequirements.length || "Nessun dato"} />
+            <Row label="Fabbisogni di acquisto" value={procurementRequirements.length || "Nessuno definito"} />
           </dl>
         )}
 
@@ -265,49 +309,91 @@ function ProjectDetailPanel({ project, terminology, materialLines, orders, activ
           </div>
         )}
 
-        <Section title={`Materiali necessari (${linkedLines.length})`}>
-          {linkedLines.length ? (
+        <Section title={`Richieste cliente (${customerRequirements.length})`}>
+          {customerRequirements.length ? (
             <div className="space-y-2">
-              {linkedLines.map((line) => {
+              {customerRequirements.map((line) => (
+                  <div key={line.id} className="rounded-md border p-3 text-[13px]" style={{ borderColor: "var(--color-border)" }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium">{line.description || "Prodotto da definire"}</div>
+                        <div className="mt-0.5" style={{ color: "var(--color-text-muted)" }}>
+                          {[formatNumber(line.quantity), line.unit, formatDate(line.requiredDate)].filter(Boolean).join(" · ") || "Dettagli non indicati"}
+                        </div>
+                      </div>
+                      <StatusBadge status={line.needsReview ? "TO_VERIFY" : "Richiesto"} />
+                    </div>
+                    {onCreateProcurementRequirement && (
+                      <button type="button" onClick={() => startProcurementDraft(line)} className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: "var(--color-primary)" }}>
+                        <Plus className="h-3.5 w-3.5" /> Definisci un materiale da acquistare
+                      </button>
+                    )}
+                  </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyHint text="Nessuna richiesta cliente strutturata per questo lavoro." />
+          )}
+        </Section>
+
+        {procurementDraft && (
+          <Section title="Nuovo fabbisogno di acquisto">
+            <div className="space-y-3 rounded-md border p-3 text-sm" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)" }}>
+              <div className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+                Richiesta cliente: <span className="font-medium" style={{ color: "var(--color-text)" }}>{procurementDraft.sourceDescription}</span>
+              </div>
+              <label className="block">
+                <span className="font-semibold">Materiale o servizio da acquistare</span>
+                <input className={inputClass} style={inputStyle} value={procurementDraft.description} onChange={(e) => setProcurementDraft({ ...procurementDraft, description: e.target.value })} placeholder="Es. Carta patinata 300 g" />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="font-semibold">Quantità</span>
+                  <input type="number" min="0" step="any" className={inputClass} style={inputStyle} value={procurementDraft.quantity} onChange={(e) => setProcurementDraft({ ...procurementDraft, quantity: e.target.value })} />
+                </label>
+                <label className="block">
+                  <span className="font-semibold">Unità</span>
+                  <input className={inputClass} style={inputStyle} value={procurementDraft.unit} onChange={(e) => setProcurementDraft({ ...procurementDraft, unit: e.target.value })} placeholder="RISME" />
+                </label>
+              </div>
+              <label className="block">
+                <span className="font-semibold">Data necessaria</span>
+                <input type="date" className={inputClass} style={inputStyle} value={procurementDraft.requiredDate} onChange={(e) => setProcurementDraft({ ...procurementDraft, requiredDate: e.target.value })} />
+              </label>
+              <div className="flex gap-2">
+                <Button className="h-9 flex-1" onClick={saveProcurementDraft} disabled={busy}>Crea fabbisogno</Button>
+                <Button variant="secondary" className="h-9" onClick={() => setProcurementDraft(null)} disabled={busy}>Annulla</Button>
+              </div>
+            </div>
+          </Section>
+        )}
+
+        <Section title={`Fabbisogni di acquisto (${procurementRequirements.length})`}>
+          {procurementRequirements.length ? (
+            <div className="space-y-2">
+              {procurementRequirements.map((line) => {
                 const state = procurementState(line, linkedOrders);
                 const previousSuppliers = historicalSuppliers(line, materialLines, project.projectCode);
                 return (
                   <div key={line.id} className="rounded-md border p-3 text-[13px]" style={{ borderColor: "var(--color-border)" }}>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-medium">{line.description || "Materiale"}</div>
+                        <div className="font-medium">{line.description || "Materiale da definire"}</div>
                         <div className="mt-0.5" style={{ color: "var(--color-text-muted)" }}>
-                          {[formatNumber(line.quantity), line.unit, line.orderCode ? `Ordine ${line.orderCode}` : null].filter(Boolean).join(" · ") || "Quantita non indicata"}
+                          {[formatNumber(line.quantity), line.unit, line.orderCode ? `Ordine ${line.orderCode}` : null].filter(Boolean).join(" · ") || "Quantità non indicata"}
                         </div>
                       </div>
-                      <span
-                        className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold"
-                        style={{
-                          color: `var(--color-${state.tone})`,
-                          backgroundColor: `color-mix(in srgb, var(--color-${state.tone}) 10%, white)`
-                        }}
-                      >
-                        <state.Icon className="h-3 w-3" />
-                        {state.label}
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold" style={{ color: `var(--color-${state.tone})`, backgroundColor: `color-mix(in srgb, var(--color-${state.tone}) 10%, white)` }}>
+                        <state.Icon className="h-3 w-3" /> {state.label}
                       </span>
                     </div>
-                    {line.supplierName && (
-                      <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-                        Fornitore associato: <span className="font-medium" style={{ color: "var(--color-text)" }}>{line.supplierName}</span>
-                      </div>
-                    )}
-                    {!line.supplierName && previousSuppliers.length > 0 && (
-                      <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
-                        Gia acquistato da: <span className="font-medium" style={{ color: "var(--color-text)" }}>{previousSuppliers.join(", ")}</span>
-                      </div>
-                    )}
+                    {line.supplierName && <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Fornitore: <span className="font-medium" style={{ color: "var(--color-text)" }}>{line.supplierName}</span></div>}
+                    {!line.supplierName && previousSuppliers.length > 0 && <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Acquisti simili: <span className="font-medium" style={{ color: "var(--color-text)" }}>{previousSuppliers.join(", ")}</span></div>}
                   </div>
                 );
               })}
             </div>
-          ) : (
-            <EmptyHint text="Nessuna riga materiale collegata a questo lavoro." />
-          )}
+          ) : <EmptyHint text="Nessun fabbisogno di acquisto definito: le richieste cliente non vengono trasformate automaticamente." />}
         </Section>
 
         <Section title={`${terminology.ordersPlural} collegati (${linkedOrders.length})`}>

@@ -154,6 +154,15 @@ export function createApiAdapter(dataSource, { getAccessToken } = {}) {
       return parseOrThrow(response, "Supplier orders API");
     },
 
+    async procurementRequirementAction(payload) {
+      const response = await apiFetch("/api/procurement-requirements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      return parseOrThrow(response, "Procurement requirements API");
+    },
+
     async saveAppUser(fields) {
       const response = await apiFetch("/api/app-users", {
         method: fields.id ? "PATCH" : "POST",

@@ -17,6 +17,7 @@
     "tenant:test": "node scripts/provision-organization.js --temporary-test --execute",
     "platform-admin": "node scripts/provision-platform-admin.js",
     "test:receiving-api": "node --env-file=.env.local scripts/test-receiving-api.js",
+    "test:procurement": "node scripts/test-procurement-model.mjs",
     "test:contractwatch": "node --env-file=.env.local scripts/test-contractwatch-foundation.js && node --env-file=.env.local scripts/test-contractwatch-api.js && node --env-file=.env.local scripts/test-contractwatch-sal-billing.js"
   },
   "dependencies": {

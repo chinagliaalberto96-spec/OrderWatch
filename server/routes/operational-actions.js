@@ -23,6 +23,7 @@ const LABEL_BY_KIND = {
 
 const CANONICAL_TABLE_BY_KIND = {
   project_requirement: "project_requirements",
+  procurement_requirement: "procurement_requirements",
   quote_line: "quote_lines",
   purchase_order_line: "purchase_order_lines",
   delivery_note_line: "delivery_note_lines"
@@ -177,6 +178,12 @@ async function updateCanonicalLine({ existing, action, targets, organizationId }
     if (!current) throw new Error("Riga canonica non trovata.");
     const patch = { needs_review: false, updated_at: now };
     if (existing.entity_kind === "project_requirement" && current.status === "needs_review") patch.status = "requested";
+    if (existing.entity_kind === "procurement_requirement") {
+      if (!current.description || !current.requested_quantity || !current.unit_of_measure) {
+        throw new Error("Completa descrizione, quantità e unità prima di approvare il fabbisogno.");
+      }
+      patch.status = "approved";
+    }
     if (existing.entity_kind === "purchase_order_line" && current.status === "draft") patch.status = "ordered";
     await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
       method: "PATCH",
@@ -188,9 +195,20 @@ async function updateCanonicalLine({ existing, action, targets, organizationId }
       method: "PATCH",
       body: {
         project_id: targets.project?.id || targets.order?.project_id || existing.project_id,
-        order_id: targets.order?.id || null,
-        status: targets.order ? "ordered" : "requested",
+        order_id: null,
+        status: "requested",
         needs_review: false,
+        updated_at: now
+      }
+    });
+  } else if (existing.entity_kind === "procurement_requirement") {
+    if (!targets.project) throw new Error("Seleziona il lavoro a cui appartiene il fabbisogno.");
+    await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: {
+        project_id: targets.project.id,
+        needs_review: true,
+        status: "draft",
         updated_at: now
       }
     });
