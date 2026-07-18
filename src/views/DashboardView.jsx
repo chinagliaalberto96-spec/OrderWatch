@@ -212,6 +212,17 @@ export default function DashboardView({
     return bv - av;
   });
 
+  const selectedSourceEmailId = selectedItem?.sourceEmailId || (selectedItem?.kind === "processed_email" ? selectedItem.entityId : null);
+  const selectedSourceEmail = selectedSourceEmailId
+    ? (data.processedEmails || []).find((email) => email.id === selectedSourceEmailId) || null
+    : null;
+  const selectedEvidenceLines = selectedSourceEmailId
+    ? (data.materialLines || []).filter((line) => line.sourceEmailId === selectedSourceEmailId)
+    : [];
+  const selectedSourceDocuments = selectedSourceEmailId
+    ? (data.documents || []).filter((document) => document.sourceEmailId === selectedSourceEmailId)
+    : [];
+
   const upcomingArrivals = (essentialMode ? (data.materialLines || []).map((line) => ({
     ...line,
     material: line.description,
@@ -511,6 +522,9 @@ export default function DashboardView({
           confirmationDraft={confirmationDraft}
           onConfirmationDraftChange={setConfirmationDraft}
           mailboxes={data.mailboxes || []}
+          sourceEmail={selectedSourceEmail}
+          evidenceLines={selectedEvidenceLines}
+          sourceDocuments={selectedSourceDocuments}
         />
       )}
     </div>
@@ -640,7 +654,10 @@ function ActionDrawer({
   onPrepareConfirmation,
   onSaveConfirmation,
   onSendConfirmation,
-  hiddenMode = false
+  hiddenMode = false,
+  sourceEmail,
+  evidenceLines = [],
+  sourceDocuments = []
 }) {
   const tone = priorityTone(item.priority);
   const color = toneColor(tone);
@@ -708,6 +725,15 @@ function ActionDrawer({
                 : (item.orderCode || item.projectCode || "Non collegato")}
             />
           </div>
+
+          {(sourceEmail || evidenceLines.length > 0 || sourceDocuments.length > 0) && (
+            <SourceEvidence
+              email={sourceEmail}
+              lines={evidenceLines}
+              documents={sourceDocuments}
+              onOpenSource={onOpenFull}
+            />
+          )}
 
           {isMaterialGroup && (
             <div className="rounded-md border" style={{ borderColor: "var(--color-border)" }}>
@@ -956,6 +982,86 @@ function ActionDrawer({
         </div>
       </section>
     </div>
+  );
+}
+
+function SourceEvidence({ email, lines = [], documents = [], onOpenSource }) {
+  const isOther = String(email?.classification || "").toUpperCase() === "OTHER";
+
+  return (
+    <section className="overflow-hidden rounded-md border" style={{ borderColor: "var(--color-border)" }}>
+      <div className="border-b px-3 py-2.5" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)" }}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase" style={{ color: "var(--color-text-muted)" }}>Cosa ha trovato il sistema</div>
+            <div className="mt-0.5 text-[13px] font-semibold">Fonte e dati estratti dalla stessa email</div>
+          </div>
+          <button type="button" onClick={onOpenSource} className="shrink-0 text-[11px] font-semibold hover:underline" style={{ color: "var(--color-accent)" }}>
+            Apri fonte
+          </button>
+        </div>
+      </div>
+
+      {email && (
+        <div className="space-y-1 px-3 py-2.5 text-[12px]">
+          <div className="font-semibold" style={{ color: "var(--color-text)" }}>{email.subject || "Email senza oggetto"}</div>
+          <div className="flex flex-wrap gap-x-2 gap-y-1" style={{ color: "var(--color-text-muted)" }}>
+            {!isOther && email.from && <span>Da: {email.from}</span>}
+            {email.receivedAt && <span>{formatDate(email.receivedAt)}</span>}
+            {email.classification && <span>Classificazione: {email.classification}</span>}
+          </div>
+          {isOther && <div style={{ color: "var(--color-text-muted)" }}>Contenuto non esposto: email classificata come non operativa.</div>}
+        </div>
+      )}
+
+      {documents.length > 0 && (
+        <div className="border-t px-3 py-2" style={{ borderColor: "var(--color-border)" }}>
+          <div className="text-[11px] font-semibold uppercase" style={{ color: "var(--color-text-muted)" }}>Documenti rilevati</div>
+          <div className="mt-1 space-y-1">
+            {documents.map((document) => (
+              <div key={document.id} className="flex items-center justify-between gap-3 text-[12px]">
+                <span className="min-w-0 truncate font-medium">{document.name || "Documento senza nome"}</span>
+                <span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{document.type || "Documento"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {lines.length > 0 ? (
+        <div className="border-t" style={{ borderColor: "var(--color-border)" }}>
+          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase" style={{ color: "var(--color-text-muted)" }}>
+            Righe estratte ({lines.length})
+          </div>
+          <div className="divide-y" style={{ borderColor: "var(--color-border)" }}>
+            {lines.map((line) => {
+              const confidence = Number(line.confidence);
+              return (
+                <div key={line.id} className="px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-[12.5px] font-semibold">{line.description || "Descrizione non riconosciuta"}</div>
+                      <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>
+                        {line.itemCode && <span>Cod. {line.itemCode}</span>}
+                        {line.quantity && <span>{line.quantity}{line.unit ? ` ${line.unit}` : ""}</span>}
+                        {(line.dueDate || line.requiredDate) && <span>Data {formatDate(line.dueDate || line.requiredDate)}</span>}
+                      </div>
+                    </div>
+                    {Number.isFinite(confidence) && (
+                      <span className="shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold" style={{ borderColor: "var(--color-border)", color: confidence < 0.85 ? "var(--color-warning)" : "var(--color-success)" }}>
+                        {Math.round(confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        !isOther && <div className="border-t px-3 py-2 text-[12px]" style={{ borderColor: "var(--color-border)", color: "var(--color-text-muted)" }}>Nessuna riga materiale strutturata estratta da questa email.</div>
+      )}
+    </section>
   );
 }
 
