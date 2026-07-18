@@ -164,8 +164,12 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
     }),
     materialLines: (row) => ({
       id: row.id,
+      entityKind: row.entity_kind || "material_line",
+      parentId: row.parent_id || null,
       projectId: row.project_id,
       orderId: row.order_id,
+      quoteId: row.quote_id || null,
+      deliveryNoteId: row.delivery_note_id || null,
       supplierId: row.supplier_id,
       sourceType: row.source_type,
       sourceEmailId: row.source_email_id,
@@ -184,18 +188,20 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       status: row.status,
       confidence: row.confidence,
       needsReview: Boolean(row.needs_review),
+      canonicalKey: row.canonical_key || null,
+      identityKey: row.identity_key || null,
       createdAt: row.created_at
     }),
     materialLineRevisions: (row) => ({
       id: row.id,
-      materialLineId: row.material_line_id,
-      revisionType: row.revision_type,
+      materialLineId: row.entity_id || row.material_line_id,
+      revisionType: row.entity_type ? "observed" : row.revision_type,
       sourceEmailId: row.source_email_id,
       sourceDocumentId: row.source_document_id,
       previousValues: row.previous_values || {},
-      newValues: row.new_values || {},
+      newValues: row.observed_values || row.new_values || {},
       changedFields: row.changed_fields || [],
-      summary: row.summary,
+      summary: row.summary || "Dato osservato nella fonte originale",
       createdAt: row.created_at
     }),
     customerConfirmations: (row) => ({
@@ -594,10 +600,10 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       return mapRows("reminders", await request("reminders?select=*&order=created_at.desc&limit=200"));
     },
     async getMaterialLines() {
-      return mapRows("materialLines", await request("material_lines?select=*&order=created_at.desc&limit=300"));
+      return mapRows("materialLines", await request("canonical_operational_lines?select=*&order=created_at.desc&limit=500"));
     },
     async getMaterialLineRevisions() {
-      return mapRows("materialLineRevisions", await request("material_line_revisions?select=*&order=created_at.asc&limit=1000"));
+      return mapRows("materialLineRevisions", await request("canonical_line_sources?select=*&order=created_at.asc&limit=1000"));
     },
     async getDailyReports() {
       return mapRows("dailyReports", await request("daily_reports?select=*&order=report_date.desc&limit=90"));
@@ -770,17 +776,22 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
       .filter((d) => ["draft", "approved", "sent", "waiting_confirmation"].includes(d.status))
       .flatMap((d) => (d.lines || []).map((l) => l.id))
   );
-  const materialItems = materialLines.flatMap((line) => {
-    const exposeConfirmation = line.sourceType === "customer_request" && line.sourceEmailId && !customerEmailSeen.has(line.sourceEmailId);
-    if (exposeConfirmation) customerEmailSeen.add(line.sourceEmailId);
-    return materialLineToOperationalItems(
-      line,
-      confirmationByEmail.get(line.sourceEmailId),
-      exposeConfirmation,
-      linesWithActiveDispatch,
-      settingsMap["workflow.traceability_mode"] || "required_link"
-    );
-  });
+  const materialItems = materialLines
+    // Quote e DDT hanno gia' una propria entita' operativa. Mostrarne anche
+    // ogni riga come attivita' separata produrrebbe due verita' per lo stesso
+    // fatto (preventivo + righe preventivo, DDT + righe DDT).
+    .filter((line) => ["project_requirement", "purchase_order_line"].includes(line.entityKind))
+    .flatMap((line) => {
+      const exposeConfirmation = line.sourceType === "customer_request" && line.sourceEmailId && !customerEmailSeen.has(line.sourceEmailId);
+      if (exposeConfirmation) customerEmailSeen.add(line.sourceEmailId);
+      return materialLineToOperationalItems(
+        line,
+        confirmationByEmail.get(line.sourceEmailId),
+        exposeConfirmation,
+        linesWithActiveDispatch,
+        settingsMap["workflow.traceability_mode"] || "required_link"
+      );
+    });
 
   const items = [
     ...materialItems,

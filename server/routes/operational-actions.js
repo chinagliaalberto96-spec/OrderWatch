@@ -21,6 +21,13 @@ const LABEL_BY_KIND = {
   buyer_action: "Azione buyer"
 };
 
+const CANONICAL_TABLE_BY_KIND = {
+  project_requirement: "project_requirements",
+  quote_line: "quote_lines",
+  purchase_order_line: "purchase_order_lines",
+  delivery_note_line: "delivery_note_lines"
+};
+
 function patchForVerify(kind, existing) {
   const now = new Date().toISOString();
 
@@ -154,6 +161,82 @@ function describeRow(kind, row) {
   return row.id;
 }
 
+async function loadCanonicalLine(id, organizationId) {
+  const rows = await supabaseRequest(`canonical_operational_lines?id=eq.${encodeURIComponent(id)}&${orgFilter(organizationId)}&select=*&limit=1`);
+  return rows?.[0] || null;
+}
+
+async function updateCanonicalLine({ existing, action, targets, organizationId }) {
+  const table = CANONICAL_TABLE_BY_KIND[existing.entity_kind];
+  if (!table) throw new Error("Tipo riga canonica non supportato.");
+  const now = new Date().toISOString();
+
+  if (action === "verify") {
+    const currentRows = await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}&select=*&limit=1`);
+    const current = currentRows?.[0];
+    if (!current) throw new Error("Riga canonica non trovata.");
+    const patch = { needs_review: false, updated_at: now };
+    if (existing.entity_kind === "project_requirement" && current.status === "needs_review") patch.status = "requested";
+    if (existing.entity_kind === "purchase_order_line" && current.status === "draft") patch.status = "ordered";
+    await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: patch
+    });
+  } else if (existing.entity_kind === "project_requirement") {
+    if (!targets.project && !targets.order) throw new Error("Seleziona un lavoro o un ordine.");
+    await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: {
+        project_id: targets.project?.id || targets.order?.project_id || existing.project_id,
+        order_id: targets.order?.id || null,
+        status: targets.order ? "ordered" : "requested",
+        needs_review: false,
+        updated_at: now
+      }
+    });
+  } else if (existing.entity_kind === "quote_line") {
+    if (!targets.project) throw new Error("Seleziona un lavoro per collegare il preventivo.");
+    await supabaseRequest(`quotes?id=eq.${encodeURIComponent(existing.parent_id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: {
+        project_id: targets.project.id,
+        project_code: targets.project.project_code,
+        updated_at: now
+      }
+    });
+    await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: { needs_review: false, updated_at: now }
+    });
+  } else if (existing.entity_kind === "purchase_order_line") {
+    if (!targets.order) throw new Error("Seleziona un ordine per collegare la riga fornitore.");
+    await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: { order_id: targets.order.id, needs_review: false, updated_at: now }
+    });
+  } else if (existing.entity_kind === "delivery_note_line") {
+    if (!targets.order && !targets.project) throw new Error("Seleziona un ordine o un lavoro per collegare il DDT.");
+    await supabaseRequest(`delivery_notes?id=eq.${encodeURIComponent(existing.parent_id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: {
+        order_id: targets.order?.id || null,
+        order_code: targets.order?.order_code || null,
+        project_id: targets.project?.id || targets.order?.project_id || null,
+        project_code: targets.project?.project_code || targets.order?.project_code || null,
+        status: targets.order ? "matched" : "confirmed",
+        needs_review: false,
+        updated_at: now
+      }
+    });
+    await supabaseRequest(`${table}?id=eq.${encodeURIComponent(existing.id)}&${orgFilter(organizationId)}`, {
+      method: "PATCH",
+      body: { needs_review: false, updated_at: now }
+    });
+  }
+
+  return loadCanonicalLine(existing.id, organizationId);
+}
+
 export default async function handler(request, response) {
   const user = await authorizeApiRequest(request, response, { roles: ["Owner", "IT", "Admin", "Buyer"] });
   if (!user) return;
@@ -181,7 +264,11 @@ export default async function handler(request, response) {
       return;
     }
 
-    const existingRows = await supabaseRequest(`${table}?id=eq.${encodeURIComponent(id)}&${orgFilter(user.organizationId)}&select=*&limit=1`);
+    let canonicalLine = null;
+    if (kind === "material_line") canonicalLine = await loadCanonicalLine(id, user.organizationId);
+    const existingRows = canonicalLine
+      ? [canonicalLine]
+      : await supabaseRequest(`${table}?id=eq.${encodeURIComponent(id)}&${orgFilter(user.organizationId)}&select=*&limit=1`);
     const existing = existingRows?.[0];
     if (!existing) {
       response.status(404).json({ error: "Operational item not found." });
@@ -201,20 +288,28 @@ export default async function handler(request, response) {
           orderCode: request.body.orderCode || null
         }, user.organizationId)
       : null;
-    const patch = action === "verify"
-      ? patchForVerify(kind, existing)
-      : patchForLink(kind, targets);
-
-    const rows = await supabaseRequest(`${table}?id=eq.${encodeURIComponent(id)}&${orgFilter(user.organizationId)}`, {
-      method: "PATCH",
-      body: patch,
-      headers: { Prefer: "return=representation" }
-    });
+    let rows;
+    if (canonicalLine) {
+      const item = await updateCanonicalLine({ existing, action, targets, organizationId: user.organizationId });
+      rows = item ? [item] : [];
+    } else {
+      const patch = action === "verify"
+        ? patchForVerify(kind, existing)
+        : patchForLink(kind, targets);
+      rows = await supabaseRequest(`${table}?id=eq.${encodeURIComponent(id)}&${orgFilter(user.organizationId)}`, {
+        method: "PATCH",
+        body: patch,
+        headers: { Prefer: "return=representation" }
+      });
+    }
 
     // Il documento generico e la tabella specializzata devono raccontare lo
     // stesso collegamento. In precedenza il drawer salvava solo il codice sul
     // DDT/fattura, lasciando document.order_id vuoto.
-    if (action === "link" && ["delivery_note", "invoice"].includes(kind) && existing.source_email_id) {
+    const linkedDocumentKind = canonicalLine?.entity_kind === "delivery_note_line"
+      ? "delivery_note"
+      : kind;
+    if (action === "link" && ["delivery_note", "invoice"].includes(linkedDocumentKind) && existing.source_email_id) {
       await supabaseRequest(`documents?source_email_id=eq.${encodeURIComponent(existing.source_email_id)}&${orgFilter(user.organizationId)}`, {
         method: "PATCH",
         body: {
@@ -229,12 +324,12 @@ export default async function handler(request, response) {
       method: "POST",
       body: withOrg({
         title: action === "verify"
-          ? `${LABEL_BY_KIND[kind] || "Elemento"} verificato dal buyer`
-          : `${LABEL_BY_KIND[kind] || "Elemento"} collegato dal buyer`,
+          ? `${canonicalLine ? "Riga operativa" : LABEL_BY_KIND[kind] || "Elemento"} verificato dal buyer`
+          : `${canonicalLine ? "Riga operativa" : LABEL_BY_KIND[kind] || "Elemento"} collegato dal buyer`,
         type: "Operativo",
         detail: action === "verify"
-          ? `${LABEL_BY_KIND[kind] || "Elemento"} "${describeRow(kind, existing)}" segnato come verificato dalla home Oggi.`
-          : `${LABEL_BY_KIND[kind] || "Elemento"} "${describeRow(kind, existing)}" collegato dalla home Oggi.`,
+          ? `${canonicalLine ? "Riga operativa" : LABEL_BY_KIND[kind] || "Elemento"} "${describeRow(kind, existing)}" segnato come verificato dalla home Oggi.`
+          : `${canonicalLine ? "Riga operativa" : LABEL_BY_KIND[kind] || "Elemento"} "${describeRow(kind, existing)}" collegato dalla home Oggi.`,
         order_code: targets?.order?.order_code || existing.order_code || existing.linked_order_code || null,
         project_code: targets?.project?.project_code || targets?.order?.project_code || existing.project_code || existing.linked_project_code || null,
         supplier_name: existing.supplier_name || null

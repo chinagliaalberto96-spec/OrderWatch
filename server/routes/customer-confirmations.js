@@ -82,7 +82,7 @@ function confirmationBody({ customerName, lines, reference }) {
 
 async function prepareDraft({ materialLineId }, organizationId) {
   await assertFeatureEnabled(organizationId);
-  const lines = await supabaseRequest(`material_lines?id=eq.${encodeURIComponent(materialLineId)}&${orgFilter(organizationId)}&select=*&limit=1`);
+  const lines = await supabaseRequest(`canonical_operational_lines?id=eq.${encodeURIComponent(materialLineId)}&${orgFilter(organizationId)}&entity_kind=eq.project_requirement&select=*&limit=1`);
   const line = lines?.[0];
   if (!line) {
     const error = new Error("Riga materiale non trovata.");
@@ -107,7 +107,7 @@ async function prepareDraft({ materialLineId }, organizationId) {
 
   const [emailRows, siblingLines, existingRows] = await Promise.all([
     supabaseRequest(`processed_emails?id=eq.${encodeURIComponent(line.source_email_id)}&${orgFilter(organizationId)}&select=*&limit=1`),
-    supabaseRequest(`material_lines?source_email_id=eq.${encodeURIComponent(line.source_email_id)}&${orgFilter(organizationId)}&select=*&order=created_at.asc`),
+    supabaseRequest(`canonical_operational_lines?source_email_id=eq.${encodeURIComponent(line.source_email_id)}&${orgFilter(organizationId)}&entity_kind=eq.project_requirement&select=*&order=created_at.asc`),
     supabaseRequest(`customer_confirmations?source_email_id=eq.${encodeURIComponent(line.source_email_id)}&${orgFilter(organizationId)}&status=neq.cancelled&select=*&limit=1`)
   ]);
   if (existingRows?.[0]) return mapConfirmation(existingRows[0]);

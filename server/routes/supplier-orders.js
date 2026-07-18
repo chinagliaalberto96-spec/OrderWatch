@@ -147,6 +147,106 @@ async function markQuoteConverted(quoteId, orderId, orderCode, organizationId) {
   });
 }
 
+async function attachCanonicalLinesToOrder(lines, orderId, organizationId) {
+  const unsupported = lines.filter((line) => ![
+    "project_requirement",
+    "quote_line",
+    "purchase_order_line"
+  ].includes(line.entity_kind));
+  if (unsupported.length) {
+    throw httpError("Un DDT o una riga non ordinabile non puo' essere convertito in ordine fornitore.", 409);
+  }
+
+  const existing = await supabaseRequest(`purchase_order_lines?order_id=eq.${encodeURIComponent(orderId)}&${orgFilter(organizationId)}&select=*&order=line_number.asc`);
+  let nextLineNumber = (existing || []).reduce((max, line) => Math.max(max, Number(line.line_number) || 0), 0) + 1;
+  const byCanonicalKey = new Map((existing || []).filter((line) => line.canonical_key).map((line) => [line.canonical_key, line]));
+
+  for (const line of lines) {
+    if (line.entity_kind === "purchase_order_line") {
+      if (line.order_id !== orderId) {
+        await supabaseRequest(`purchase_order_lines?id=eq.${encodeURIComponent(line.id)}&${orgFilter(organizationId)}`, {
+          method: "PATCH",
+          body: { order_id: orderId, updated_at: new Date().toISOString() }
+        });
+      }
+      continue;
+    }
+
+    const sourceTable = {
+      project_requirement: "project_requirements",
+      quote_line: "quote_lines"
+    }[line.entity_kind];
+    const sourceRows = sourceTable
+      ? await supabaseRequest(`${sourceTable}?id=eq.${encodeURIComponent(line.id)}&${orgFilter(organizationId)}&select=*&limit=1`)
+      : [];
+    const source = sourceRows?.[0] || line;
+
+    let purchaseLine = line.canonical_key ? byCanonicalKey.get(line.canonical_key) : null;
+    if (
+      purchaseLine
+      && purchaseLine.source_email_id
+      && line.source_email_id
+      && purchaseLine.source_email_id !== line.source_email_id
+    ) {
+      throw httpError(
+        `Due righe diverse risultano indistinguibili ("${line.description || "materiale"}"). Verificale prima di creare l'ordine.`,
+        409
+      );
+    }
+    if (!purchaseLine) {
+      const created = await supabaseRequest("purchase_order_lines", {
+        method: "POST",
+        body: withOrg({
+          order_id: orderId,
+          line_number: nextLineNumber,
+          canonical_key: line.canonical_key,
+          identity_key: line.identity_key,
+          supplier_item_code: line.item_code,
+          description: line.description,
+          ordered_quantity: line.quantity,
+          unit_of_measure: line.unit,
+          unit_price: source.unit_price || null,
+          total_price: source.total_price || null,
+          promised_date: line.due_date || null,
+          status: "ordered",
+          source_email_id: line.source_email_id,
+          source_document_id: line.source_document_id,
+          confidence: line.confidence,
+          needs_review: Boolean(line.needs_review),
+          notes: `Creata da ${line.entity_kind || "riga canonica"}.`
+        }, organizationId),
+        headers: { Prefer: "return=representation" }
+      });
+      purchaseLine = created?.[0];
+      if (!purchaseLine) throw httpError("Impossibile creare la riga dell'ordine fornitore.", 500);
+      nextLineNumber += 1;
+      if (line.canonical_key) byCanonicalKey.set(line.canonical_key, purchaseLine);
+    }
+
+    if (line.source_email_id) {
+      await supabaseRequest("canonical_line_sources?on_conflict=organization_id,entity_type,entity_id,source_email_id,source_line_number", {
+        method: "POST",
+        body: withOrg({
+          entity_type: "purchase_order_line",
+          entity_id: purchaseLine.id,
+          source_email_id: line.source_email_id,
+          source_document_id: line.source_document_id || null,
+          source_line_number: Number(source.line_number) || 1,
+          observed_values: line
+        }, organizationId),
+        headers: { Prefer: "resolution=ignore-duplicates,return=minimal" }
+      });
+    }
+
+    if (line.entity_kind === "project_requirement") {
+      await supabaseRequest(`project_requirements?id=eq.${encodeURIComponent(line.id)}&${orgFilter(organizationId)}`, {
+        method: "PATCH",
+        body: { order_id: orderId, status: "ordered", needs_review: false, updated_at: new Date().toISOString() }
+      });
+    }
+  }
+}
+
 // FASE 2 — Preparazione: parte da una o piu' righe materiale, raggruppate per
 // fornitore. La v1 gestisce un fornitore per bozza (le righe di fornitori
 // diversi vanno preparate separatamente); il grouping avviene lato UI.
@@ -160,7 +260,7 @@ async function prepareDraft(body, organizationId) {
   if (!ids.length) throw httpError("Seleziona almeno una riga materiale.", 400);
 
   const idList = ids.map((id) => `"${String(id)}"`).join(",");
-  const lines = await supabaseRequest(`material_lines?id=in.(${idList})&${orgFilter(organizationId)}&select=*&order=created_at.asc`);
+  const lines = await supabaseRequest(`canonical_operational_lines?id=in.(${idList})&${orgFilter(organizationId)}&select=*&order=created_at.asc`);
   if (!lines?.length) throw httpError("Righe materiale non trovate.", 404);
 
   // Un solo fornitore per bozza
@@ -225,12 +325,9 @@ async function prepareDraft(body, organizationId) {
       });
       orderId = created?.[0]?.id || null;
     }
-    // aggancia le righe all'ordine
-    await supabaseRequest(`material_lines?id=in.(${idList})&${orgFilter(organizationId)}`, {
-      method: "PATCH",
-      body: { order_id: orderId, order_code: orderCode, updated_at: new Date().toISOString() }
-    });
   }
+
+  await attachCanonicalLinesToOrder(lines, orderId, organizationId);
 
   const supplierEmail = clean(body.supplierEmail).toLowerCase()
     || clean(supplier?.email).toLowerCase()
@@ -269,7 +366,8 @@ async function prepareDraft(body, organizationId) {
     body: payload,
     headers: { Prefer: "return=representation" }
   });
-  await markQuoteConverted(body.quoteId, orderId, orderCode, organizationId);
+  const quoteIds = [...new Set([body.quoteId, ...lines.map((line) => line.quote_id)].filter(Boolean))];
+  for (const quoteId of quoteIds) await markQuoteConverted(quoteId, orderId, orderCode, organizationId);
   return mapDispatch(created?.[0]);
 }
 
