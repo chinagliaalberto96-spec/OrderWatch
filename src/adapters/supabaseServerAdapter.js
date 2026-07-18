@@ -723,7 +723,14 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           sourceClassificationType: sourceEmail?.classificationType || null
         });
       });
-      const enrichedMaterialLines = materialLines.map(enrichNamedCounterparty);
+      const enrichedMaterialLines = materialLines.map((line) => {
+        const sourceEmail = emailById.get(line.sourceEmailId);
+        return enrichNamedCounterparty({
+          ...line,
+          sourceSubject: sourceEmail?.subject || null,
+          sourceClassificationType: sourceEmail?.classificationType || null
+        });
+      });
       const enrichedDeliveryNotes = deliveryNotes.map(enrichNamedCounterparty);
       const traceabilityMode = settingsMap["workflow.traceability_mode"] || "required_link";
       const visibleOrders = traceabilityMode === "supplier_only"
@@ -1006,15 +1013,46 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
         settingsMap["workflow.traceability_mode"] || "required_link"
       );
     });
-  const queueQuotes = consolidateQuotesForQueue(quotes.filter((quote) => isOperationalArtifactSource(quote.sourceClassificationType)));
+  const latestMaterialAtByConversation = new Map();
+  for (const line of materialLines.filter((item) =>
+    ["project_requirement", "purchase_order_line"].includes(item.entityKind) &&
+    isOperationalArtifactSource(item.sourceClassificationType)
+  )) {
+    const key = partyConversationKey(line);
+    if (!key) continue;
+    const createdAt = new Date(line.createdAt || 0).getTime();
+    latestMaterialAtByConversation.set(key, Math.max(latestMaterialAtByConversation.get(key) || 0, createdAt));
+  }
+  const queueQuotes = consolidateQuotesForQueue(
+    quotes.filter((quote) => isOperationalArtifactSource(quote.sourceClassificationType))
+  ).filter((quote) => {
+    const key = partyConversationKey(quote);
+    if (!key) return true;
+    const materialCreatedAt = latestMaterialAtByConversation.get(key);
+    if (!materialCreatedAt) return true;
+    // Una riga operativa piu' recente nella stessa conversazione significa
+    // che il preventivo ha gia' avanzato di fase. Tenerli entrambi in Oggi
+    // chiederebbe al buyer di gestire due volte lo stesso fatto.
+    return materialCreatedAt <= new Date(quote.createdAt || 0).getTime();
+  });
   const quoteConversationKeys = new Set(queueQuotes.map(partyConversationKey).filter(Boolean));
+  const materialConversationKeys = new Set(
+    materialLines
+      .filter((line) =>
+        ["project_requirement", "purchase_order_line"].includes(line.entityKind) &&
+        isOperationalArtifactSource(line.sourceClassificationType)
+      )
+      .map(partyConversationKey)
+      .filter(Boolean)
+  );
   const queueBuyerActions = consolidateBuyerActionsForQueue(
     buyerActions.filter((action) => action.status !== "done")
   ).filter((action) => {
     const key = partyConversationKey(action);
-    // Se la stessa conversazione ha gia' prodotto un preventivo azionabile,
-    // la generica buyer_action non deve creare una seconda verita' in Oggi.
-    return !key || !quoteConversationKeys.has(key);
+    // Se la stessa conversazione ha gia' prodotto un artefatto concreto, la
+    // generica buyer_action storica non deve creare una seconda verita' in
+    // Oggi. Preventivi e righe canoniche restano la fonte operativa.
+    return !key || (!quoteConversationKeys.has(key) && !materialConversationKeys.has(key));
   });
 
   const items = [
