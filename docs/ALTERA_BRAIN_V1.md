@@ -67,12 +67,47 @@ Settings shows the real status, observed volume, reliability, and limitations fo
 each source. Future alerts and reports must consult the assertion matrix before
 using language such as "never sent", "no reply", or "does not exist".
 
+## Operational evidence
+
+The `operational_evidence` view is the traceability layer used by the product UI.
+It does not create a parallel business object or copy source content. It projects
+the existing provenance links of canonical lines, invoices, quotes, delivery
+notes, buyer actions, and processed emails into one tenant-scoped read model.
+
+Every evidence row contains:
+
+- the operational subject (`subject_type`, `subject_id`);
+- the source email or document;
+- the observed values that support the assertion;
+- the source line when available;
+- the direction and date of the email;
+- assertion, email, and document confidence signals;
+- a final cautious status: `certain`, `probable`, `uncertain`, or `needs_review`.
+
+The dashboard drawer always shows the evidence status. The buyer can open the
+source email directly from the assertion. Emails classified as non-operational
+do not expose sender or extracted content in this panel.
+
+If no evidence exists, the product says so explicitly instead of manufacturing
+a source. Internal drafts are therefore allowed to remain visible as operational
+work, but are labelled `Fonte non disponibile` until a real source is connected.
+
+Current Graphic Center snapshot (18 July 2026):
+
+- 501 evidence links;
+- 370 distinct operational subjects covered;
+- 89 document-backed links;
+- zero evidence rows without a source;
+- 19 of 20 items in the daily queue have inspectable evidence;
+- outbound evidence remains partial (one observed outbound email).
+
+The view uses `security_invoker = true` and is readable only by the server-side
+service role. `anon` and `authenticated` have no direct access.
+
 ## Next phase
 
-1. Add evidence records that connect each operational claim to its source email,
-   document, canonical line, or buyer action.
-2. Add a central safe-language policy used by the daily report and notifications.
-3. Add health alerts for stale mailboxes, extraction failures, and deteriorating
+1. Add a central safe-language policy used by the daily report and notifications.
+2. Add health alerts for stale mailboxes, extraction failures, and deteriorating
    linkage coverage.
-4. Add learning only from explicit, traceable corrections; never learn from a
+3. Add learning only from explicit, traceable corrections; never learn from a
    hidden or unverified automatic decision.

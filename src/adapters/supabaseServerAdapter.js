@@ -266,6 +266,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       supplierId: row.supplier_id,
       sourceType: row.source_type,
       sourceEmailId: row.source_email_id,
+      sourceDocumentId: row.source_document_id,
       projectCode: row.project_code,
       orderCode: row.order_code,
       supplierName: row.supplier_name,
@@ -296,6 +297,29 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       changedFields: row.changed_fields || [],
       summary: row.summary || "Dato osservato nella fonte originale",
       createdAt: row.created_at
+    }),
+    operationalEvidence: (row) => ({
+      id: row.evidence_id,
+      subjectType: row.subject_type,
+      subjectId: row.subject_id,
+      kind: row.evidence_kind,
+      sourceEmailId: row.source_email_id,
+      sourceDocumentId: row.source_document_id,
+      sourceLineNumber: row.source_line_number,
+      observedValues: row.observed_values || {},
+      emailSubject: row.email_subject,
+      emailFrom: row.email_from,
+      emailTo: row.email_to,
+      emailDirection: row.email_direction,
+      emailDate: row.email_date,
+      classificationOrigin: row.classification_origin,
+      classificationType: row.classification_type,
+      documentName: row.document_name,
+      documentType: row.document_type,
+      confidenceStatus: row.confidence_status,
+      confidence: row.confidence === null ? null : Number(row.confidence),
+      observedAt: row.observed_at,
+      linkedAt: row.linked_at
     }),
     customerConfirmations: (row) => ({
       id: row.id,
@@ -585,7 +609,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         contractBillingItems,
         customerConfirmations,
         organizationMemberships,
-        dataCoverage
+        dataCoverage,
+        operationalEvidence
       ] =
         await Promise.all([
           this.getOrders(),
@@ -612,7 +637,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           this.getContractBillingItems(),
           this.getCustomerConfirmations(),
           this.getOrganizationMemberships(),
-          this.getDataCoverage()
+          this.getDataCoverage(),
+          this.getOperationalEvidence()
         ]);
       const [supplierDispatches, supplierContacts, contacts, contactEmails, contactAliases, contactCandidates] = await Promise.all([
         this.getSupplierDispatches(),
@@ -639,6 +665,28 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         projectCode: projects.find((project) => project.id === action.projectId)?.projectCode || null
       }));
       const emailById = new Map(processedEmails.map((email) => [email.id, email]));
+      const evidenceBySubject = new Map();
+      for (const evidence of operationalEvidence) {
+        const key = `${evidence.subjectType}:${evidence.subjectId}`;
+        evidenceBySubject.set(key, [...(evidenceBySubject.get(key) || []), evidence]);
+      }
+      const evidenceFor = (subjectType, subjectId) =>
+        subjectType && subjectId ? evidenceBySubject.get(`${subjectType}:${subjectId}`) || [] : [];
+      const enrichedOrders = orders.map((order) => ({
+        ...order,
+        evidence: evidenceFor("order", order.id)
+      }));
+      const enrichedProjects = projects.map((project) => ({
+        ...project,
+        evidence: evidenceFor("project", project.id)
+      }));
+      const operationalActionsWithEvidence = enrichedOperationalActions.map((action) => ({
+        ...action,
+        evidence: [
+          ...evidenceFor("operational_action", action.id),
+          ...evidenceFor(action.entityType, action.entityId)
+        ]
+      }));
       const contactById = new Map(contacts.map((contact) => [contact.id, contact]));
       const activeContactByName = new Map();
       for (const contact of contacts.filter((item) => item.status === "active")) {
@@ -721,7 +769,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           supplierName: action.supplierName || (origin === "SUPPLIER" ? contactName : null),
           sourceSubject: sourceEmail?.subject || null,
           sourceClassificationOrigin: origin || null,
-          sourceClassificationType: sourceEmail?.classificationType || null
+          sourceClassificationType: sourceEmail?.classificationType || null,
+          evidence: evidenceFor("buyer_action", action.id)
         };
       });
       const enrichedQuotes = quotes.map((quote) => {
@@ -736,7 +785,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           customerName: isCustomer && contact?.legalName ? contact.legalName : quote.customerName,
           supplierName: isSupplier && contact?.legalName ? contact.legalName : quote.supplierName,
           sourceSubject: sourceEmail?.subject || null,
-          sourceClassificationType: sourceEmail?.classificationType || null
+          sourceClassificationType: sourceEmail?.classificationType || null,
+          evidence: evidenceFor("quote", quote.id)
         });
       });
       const enrichedMaterialLines = materialLines.map((line) => {
@@ -744,22 +794,30 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         return enrichNamedCounterparty({
           ...line,
           sourceSubject: sourceEmail?.subject || null,
-          sourceClassificationType: sourceEmail?.classificationType || null
+          sourceClassificationType: sourceEmail?.classificationType || null,
+          evidence: evidenceFor(line.entityKind, line.id)
         });
       });
-      const enrichedDeliveryNotes = deliveryNotes.map(enrichNamedCounterparty);
+      const enrichedDeliveryNotes = deliveryNotes.map((note) => enrichNamedCounterparty({
+        ...note,
+        evidence: evidenceFor("delivery_note", note.id)
+      }));
+      const enrichedInvoices = invoices.map((invoice) => ({
+        ...invoice,
+        evidence: evidenceFor("invoice", invoice.id)
+      }));
       const traceabilityMode = settingsMap["workflow.traceability_mode"] || "required_link";
       const visibleOrders = traceabilityMode === "supplier_only"
-        ? orders.filter((order) => !/^(GCG-AI-|DDT-)/i.test(String(order.orderCode || "")))
-        : orders;
+        ? enrichedOrders.filter((order) => !/^(GCG-AI-|DDT-)/i.test(String(order.orderCode || "")))
+        : enrichedOrders;
       const operationalQueue = buildOperationalQueue({
         materialLines: enrichedMaterialLines,
         quotes: enrichedQuotes,
         deliveryNotes: enrichedDeliveryNotes,
-        invoices,
+        invoices: enrichedInvoices,
         processedEmails,
         buyerActions: enrichedBuyerActions,
-        operationalActions: enrichedOperationalActions,
+        operationalActions: operationalActionsWithEvidence,
         customerConfirmations,
         supplierDispatches,
         settingsMap
@@ -767,17 +825,17 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       const operationalSuggestions = buildOperationalSuggestions({
         materialLines: enrichedMaterialLines,
         deliveryNotes: enrichedDeliveryNotes,
-        invoices,
+        invoices: enrichedInvoices,
         settingsMap
       });
       return {
         orders: visibleOrders,
-        projects,
+        projects: enrichedProjects,
         suppliers,
         documents,
         activities,
         reminders,
-        materialLines,
+        materialLines: enrichedMaterialLines,
         materialLineRevisions,
         dailyReports,
         processedEmails,
@@ -787,9 +845,9 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         reportRecipients,
         quotes: enrichedQuotes,
         deliveryNotes: enrichedDeliveryNotes,
-        invoices,
+        invoices: enrichedInvoices,
         buyerActions: enrichedBuyerActions,
-        operationalActions: enrichedOperationalActions,
+        operationalActions: operationalActionsWithEvidence,
         contractProgressReports,
         contractBillingItems,
         customerConfirmations,
@@ -800,6 +858,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         contactAliases,
         contactCandidates,
         dataCoverage,
+        operationalEvidence,
         reviewQueue,
         reviewSummary: {
           total: reviewQueue.length,
@@ -860,6 +919,12 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       return mapRows(
         "dataCoverage",
         await request("data_source_coverage?select=*&order=category.asc,label.asc")
+      );
+    },
+    async getOperationalEvidence() {
+      return mapRows(
+        "operationalEvidence",
+        await request("operational_evidence?select=*&order=observed_at.desc&limit=2000")
       );
     },
     async getReportRecipients() {
@@ -1230,6 +1295,9 @@ export function groupSupplierMaterialItems(items = []) {
       contactId: orderedLines.find((line) => line.contactId)?.contactId || null,
       counterpartyType: "supplier",
       confidence: confidenceValues.length ? Math.min(...confidenceValues) : null,
+      evidence: [...new Map(
+        orderedLines.flatMap((line) => line.evidence || []).map((entry) => [entry.id, entry])
+      ).values()],
       date: orderedLines[0].date,
       sortDate: dueDate || orderedLines[0].sortDate,
       lineItems: orderedLines
@@ -1262,6 +1330,7 @@ export function buildOperationalSuggestions({ materialLines = [], deliveryNotes 
       customerName: line.customerName,
       sourceEmailId: line.sourceEmailId,
       sourceType: line.sourceType,
+      evidence: line.evidence || [],
       itemCode: line.itemCode,
       quantity: line.quantity,
       unit: line.unit,
@@ -1284,6 +1353,7 @@ export function buildOperationalSuggestions({ materialLines = [], deliveryNotes 
       actionLabel: "Collega DDT",
       supplierName: item.supplierName,
       sourceEmailId: item.sourceEmailId,
+      evidence: item.evidence || [],
       date: item.createdAt
     }))
   ];
@@ -1363,6 +1433,7 @@ function materialLineToOperationalItems(line, confirmation, exposeConfirmation =
     counterpartyType: line.counterpartyType,
     sourceType: line.sourceType,
     sourceEmailId: line.sourceEmailId,
+    evidence: line.evidence || [],
     confirmation: confirmation || null,
     confidence: line.confidence,
     itemCode: line.itemCode,
@@ -1456,6 +1527,7 @@ function quoteToOperationalItems(quote) {
     customerName: quote.customerName,
     quoteType: quote.quoteType,
     sourceEmailId: quote.sourceEmailId,
+    evidence: quote.evidence || [],
     confidence: quote.confidence,
     date: quote.createdAt,
     sortDate: quote.validUntil || quote.createdAt
@@ -1482,6 +1554,8 @@ function deliveryNoteToOperationalItems(note, traceabilityMode = "required_link"
     projectCode: note.projectCode,
     orderCode: note.orderCode,
     supplierName: note.supplierName,
+    sourceEmailId: note.sourceEmailId,
+    evidence: note.evidence || [],
     confidence: note.confidence,
     date: note.createdAt,
     sortDate: note.deliveryDate || note.receivedDate || note.createdAt
@@ -1507,6 +1581,7 @@ function actionToOperationalItem(action) {
     contactId: action.contactId,
     counterpartyType: action.counterpartyType,
     sourceEmailId: action.sourceEmailId,
+    evidence: action.evidence || [],
     date: action.actionAt || action.createdAt,
     sortDate: action.actionAt || action.createdAt
   };
