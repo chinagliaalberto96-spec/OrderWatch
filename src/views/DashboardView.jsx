@@ -1035,8 +1035,15 @@ function SourceEvidence({ item, email, lines = [], documents = [], revisions = [
           <div className="flex flex-wrap gap-x-2 gap-y-1" style={{ color: "var(--color-text-muted)" }}>
             {!isOther && email.from && <span>Da: {email.from}</span>}
             {email.receivedAt && <span>{formatDate(email.receivedAt)}</span>}
-            {email.classification && <span>Classificazione: {email.classification}</span>}
+            {email.direction && <span>{email.direction === "outbound" ? "Inviata" : "Ricevuta"}</span>}
+            {(email.classificationType || email.classification) && <span>Tipo: {email.classificationType || email.classification}</span>}
+            {email.attachmentCount > 0 && <span>{email.attachmentCount} {email.attachmentCount === 1 ? "allegato" : "allegati"}</span>}
           </div>
+          {!isOther && email.skippedReason && (
+            <div className="mt-2 rounded border px-2.5 py-2 leading-relaxed" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)", color: "var(--color-text)" }}>
+              <span className="font-semibold">Interpretazione del sistema: </span>{email.skippedReason}
+            </div>
+          )}
           {isOther && <div style={{ color: "var(--color-text-muted)" }}>Contenuto non esposto: email classificata come non operativa.</div>}
         </div>
       )}
