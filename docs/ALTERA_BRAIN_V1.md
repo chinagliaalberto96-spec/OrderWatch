@@ -80,6 +80,31 @@ The daily report also includes a source-coverage section whenever one or more
 sources are partial or unavailable. Its company name is resolved from the active
 tenant rather than being hardcoded to Graphic Center.
 
+## System health alerts
+
+`system_health_alerts` is a server-only read model for technical anomalies. It is
+deliberately separate from the buyer queue and never creates an item in `Oggi`.
+The current categories are:
+
+- active mailboxes with a connection error;
+- connected mailboxes without a successful check for more than 30 minutes;
+- email processing failures in the last 72 hours;
+- processing records stuck for more than 30 minutes;
+- extraction candidates left in quarantine for more than 24 hours;
+- operational linkage below 85% or falling by at least five percentage points.
+
+`data_source_coverage_snapshots` stores one sample per source, tenant, and hour.
+The worker refreshes the sample after each mailbox cycle. This makes a real
+trend observable while keeping the history bounded to 90 days and avoiding a
+second operational source of truth.
+
+Mailbox failures are recorded on the mailbox itself and do not stop the other
+mailboxes from being polled. A technical failure is therefore visible without
+turning a temporary problem in one account into an outage of the whole tenant.
+
+Settings and Notifications render technical alerts in a dedicated section.
+They are not mixed with deadlines, reminders, or other work assigned to buyers.
+
 ## Operational evidence
 
 The `operational_evidence` view is the traceability layer used by the product UI.
@@ -119,7 +144,5 @@ service role. `anon` and `authenticated` have no direct access.
 
 ## Next phase
 
-1. Add health alerts for stale mailboxes, extraction failures, and deteriorating
-   linkage coverage.
-2. Add learning only from explicit, traceable corrections; never learn from a
-   hidden or unverified automatic decision.
+Add learning only from explicit, traceable corrections; never learn from a
+hidden or unverified automatic decision.

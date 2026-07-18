@@ -35,7 +35,7 @@ function NotificationStatus({ status }) {
   );
 }
 
-function buildNotificationItems({ orders, reminders, processedEmails, config, languagePolicy }) {
+function buildNotificationItems({ orders, reminders, config, languagePolicy }) {
   const orderItems = (orders || [])
     .map((order) => ({ ...order, computedStatus: getOrderStatus(order, config.alertRules) }))
     .filter((order) => ["OVERDUE", "CRITICAL", "WARNING", "TO_VERIFY"].includes(order.computedStatus))
@@ -59,19 +59,7 @@ function buildNotificationItems({ orders, reminders, processedEmails, config, la
     date: reminder.sentAt
   }));
 
-  const importItems = (processedEmails || [])
-    .filter((email) => email.status === "Error" || email.status?.trim() === "Processing")
-    .map((email) => ({
-      id: `import-${email.id}`,
-      source: "Importazione",
-      status: email.status === "Error" ? "error" : "warning",
-      title: email.subject || email.messageId || "Email da controllare",
-      detail: email.errorDetail || "Importazione non conclusa",
-      recipient: "Operatore",
-      date: email.receivedAt
-    }));
-
-  return [...orderItems, ...reminderItems, ...importItems].sort((a, b) => {
+  return [...orderItems, ...reminderItems].sort((a, b) => {
     const aDate = a.date ? new Date(a.date).getTime() : 0;
     const bDate = b.date ? new Date(b.date).getTime() : 0;
     return bDate - aDate;
@@ -89,7 +77,7 @@ function parseSettingValue(settingsByKey, key, fallback = null) {
   return setting.value ?? fallback;
 }
 
-export default function NotificationsView({ config, data }) {
+export default function NotificationsView({ config, data, onNavigate }) {
   const [activeFilter, setActiveFilter] = useState("all");
   const settingsByKey = useMemo(
     () => Object.fromEntries((data.settings || []).map((setting) => [setting.settingKey, setting])),
@@ -102,10 +90,9 @@ export default function NotificationsView({ config, data }) {
   const items = useMemo(() => buildNotificationItems({
     orders: data.orders,
     reminders: data.reminders,
-    processedEmails: data.processedEmails,
     config,
     languagePolicy
-  }), [config, data.orders, data.processedEmails, data.reminders, languagePolicy]);
+  }), [config, data.orders, data.reminders, languagePolicy]);
 
   const visibleItems = activeFilter === "all" ? items : items.filter((item) => item.status === activeFilter);
   const draftCount = items.filter((item) => item.status === "draft").length;
@@ -122,6 +109,7 @@ export default function NotificationsView({ config, data }) {
   const reportRecipient = parseSettingValue(settingsByKey, "daily_report.recipient_name", "Buyer");
   const reportEmail = parseSettingValue(settingsByKey, "daily_report.recipient_email", "-");
   const reportChannel = parseSettingValue(settingsByKey, "daily_report.channel", "email");
+  const systemHealthAlerts = data.systemHealthAlerts || [];
 
   return (
     <div className="mx-auto max-w-[1180px] space-y-4">
@@ -129,7 +117,7 @@ export default function NotificationsView({ config, data }) {
         <div>
           <h1 className="text-[18px] font-semibold">Notifiche buyer</h1>
           <p className="mt-0.5 text-[13px]" style={{ color: "var(--color-text-muted)" }}>
-            Coda operativa per alert, solleciti e problemi di importazione.
+            Coda operativa per scadenze e solleciti. Gli avvisi tecnici restano separati.
           </p>
         </div>
         <div className="flex items-center gap-4 text-[13px]">
@@ -138,6 +126,41 @@ export default function NotificationsView({ config, data }) {
           <span><strong>{failedCount}</strong> errori</span>
         </div>
       </div>
+
+      {systemHealthAlerts.length > 0 && (
+        <section className="overflow-hidden rounded-lg border bg-white" style={{ borderColor: "var(--color-border)" }}>
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-3" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)" }}>
+            <div>
+              <div className="text-[13.5px] font-semibold">Avvisi tecnici di sistema</div>
+              <div className="mt-0.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+                Non sono attivita del buyer e non entrano nella coda Oggi.
+              </div>
+            </div>
+            <span className="text-[12px] font-semibold" style={{ color: "var(--color-warning)" }}>
+              {systemHealthAlerts.length} da controllare
+            </span>
+          </div>
+          {systemHealthAlerts.map((alert) => (
+            <div key={alert.id} className="grid gap-2 border-b px-4 py-3 last:border-b-0 md:grid-cols-[120px_minmax(0,1fr)_auto] md:items-center" style={{ borderColor: "var(--color-border)" }}>
+              <NotificationStatus status={alert.severity} />
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold">{alert.title}</div>
+                <div className="mt-0.5 text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>{alert.message}</div>
+              </div>
+              {alert.targetView && onNavigate && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate(alert.targetView)}
+                  className="rounded-md border px-3 py-1.5 text-[12px] font-semibold"
+                  style={{ borderColor: "var(--color-border)", color: "var(--color-primary)" }}
+                >
+                  {alert.actionLabel || "Apri"}
+                </button>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {filters.map((filter) => {

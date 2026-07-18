@@ -39,11 +39,11 @@ const thresholdLabels = {
 // contenuto nascosto di default tranne dove serve lettura immediata
 // (vedi defaultOpen sotto). Nessuna card annidata: il contenitore esterno
 // unico fa da cornice, ogni sezione e' solo una riga + corpo.
-function Section({ title, hint, defaultOpen = false, right, children }) {
+function Section({ id, title, hint, defaultOpen = false, right, children }) {
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div>
+    <div id={id}>
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -97,6 +97,56 @@ function HealthRow({ label, description, status, tone = "success", icon: Icon = 
       <span className="justify-self-end text-[12.5px] font-semibold" style={{ color: `var(--color-${tone})` }}>
         {status}
       </span>
+    </div>
+  );
+}
+
+const systemAlertMeta = {
+  critical: { label: "Critico", tone: "danger" },
+  warning: { label: "Attenzione", tone: "warning" },
+  info: { label: "Informazione", tone: "primary" }
+};
+
+function SystemHealthAlertRow({ alert, onNavigate }) {
+  const meta = systemAlertMeta[alert.severity] || systemAlertMeta.warning;
+
+  const handleAction = () => {
+    if (alert.targetView === "settings") {
+      const anchorId = alert.category === "mailbox" ? "system-status-section" : "data-coverage-section";
+      document.getElementById(anchorId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    onNavigate?.(alert.targetView);
+  };
+
+  return (
+    <div className="grid gap-2 border-b py-3.5 last:border-b-0 md:grid-cols-[20px_minmax(0,1fr)_auto] md:gap-3" style={{ borderColor: "var(--color-border)" }}>
+      <AlertTriangle className="mt-0.5 h-4 w-4" style={{ color: `var(--color-${meta.tone})` }} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[13.5px] font-semibold">{alert.title}</span>
+          <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+        </div>
+        <div className="mt-1 text-[12.5px] leading-5" style={{ color: "var(--color-text-muted)" }}>
+          {alert.message}
+        </div>
+        {alert.detectedAt && (
+          <div className="mt-1 text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>
+            Rilevato: {formatDate(alert.detectedAt)}
+          </div>
+        )}
+      </div>
+      {alert.targetView && onNavigate && (
+        <button
+          type="button"
+          onClick={handleAction}
+          className="self-start rounded-md border px-3 py-1.5 text-[12px] font-semibold transition hover:bg-black/[0.02]"
+          style={{ borderColor: "var(--color-border)", color: "var(--color-primary)" }}
+        >
+          {alert.actionLabel || "Apri"}
+        </button>
+      )}
     </div>
   );
 }
@@ -1386,7 +1436,8 @@ export default function SettingsView({
   onDeleteReportRecipient,
   onSaveMailbox,
   onTestMailbox,
-  onDisconnectMailbox
+  onDisconnectMailbox,
+  onNavigate
 }) {
   const { mode, lastUpdated, counts = {} } = meta;
   const processedEmails = data.processedEmails || [];
@@ -1397,6 +1448,7 @@ export default function SettingsView({
   const appUsers = data.appUsers || [];
   const mailboxes = data.mailboxes || [];
   const dataCoverage = data.dataCoverage || [];
+  const systemHealthAlerts = data.systemHealthAlerts || [];
   const reportRecipients = data.reportRecipients || [];
   const latestImport = getLatestDate(processedEmails, "receivedAt");
   const latestActivity = getLatestDate(data.activities || [], "date");
@@ -1407,6 +1459,7 @@ export default function SettingsView({
   const lowConfidenceOrders = orders.filter((order) => Number(order.aiConfidence || 1) < 0.7 || order.needsReview).length;
   const reviewTotal = counts.review ?? reviewDocuments + lowConfidenceOrders;
   const connectedMailboxes = mailboxes.filter((mailbox) => mailbox.connectionStatus === "connected");
+  const mailboxHealthAlerts = systemHealthAlerts.filter((alert) => alert.category === "mailbox");
   const monitoredMailbox =
     connectedMailboxes.map((mailbox) => mailbox.emailAddress).filter(Boolean).join(", ") ||
     parseSettingValue(settingsByKey["client.monitored_mailbox"]) ||
@@ -1471,8 +1524,8 @@ export default function SettingsView({
       ? {
           label: "Worker email",
           description: "Lettura mailbox, classificazione AI ed estrazione automatica con controllo duplicati",
-          status: "Attivo",
-          tone: "success",
+          status: mailboxHealthAlerts.length ? "Da verificare" : "Attivo",
+          tone: mailboxHealthAlerts.length ? "danger" : "success",
           icon: Workflow
         }
       : {
@@ -1567,7 +1620,26 @@ export default function SettingsView({
       </div>
 
       <div className="divide-y rounded-lg border bg-white" style={{ borderColor: "var(--color-border)" }}>
-        <Section title="Stato sistema" defaultOpen>
+        <Section
+          title="Avvisi tecnici"
+          hint={systemHealthAlerts.length ? `${systemHealthAlerts.length} da controllare` : "Nessun problema rilevato"}
+          defaultOpen={systemHealthAlerts.length > 0}
+        >
+          {systemHealthAlerts.length ? (
+            <div>
+              {systemHealthAlerts.map((alert) => (
+                <SystemHealthAlertRow key={alert.id} alert={alert} onNavigate={onNavigate} />
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 py-2 text-[13px]" style={{ color: "var(--color-success)" }}>
+              <CheckCircle2 className="h-4 w-4" />
+              Caselle, elaborazioni e copertura dati non presentano anomalie tecniche.
+            </div>
+          )}
+        </Section>
+
+        <Section id="system-status-section" title="Stato sistema" defaultOpen>
           <div>
             {healthRows.map((row) => (
               <HealthRow key={row.label} {...row} />
@@ -1576,6 +1648,7 @@ export default function SettingsView({
         </Section>
 
         <Section
+          id="data-coverage-section"
           title="Copertura dati"
           hint={`${dataCoverage.filter((item) => item.status === "available").length}/${dataCoverage.length || 0} fonti disponibili`}
           defaultOpen

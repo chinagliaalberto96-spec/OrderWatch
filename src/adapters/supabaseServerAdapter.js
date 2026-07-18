@@ -435,6 +435,18 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       limitation: row.limitation,
       metadata: row.metadata || {}
     }),
+    systemHealthAlerts: (row) => ({
+      id: row.alert_key,
+      category: row.category,
+      severity: row.severity,
+      title: row.title,
+      message: row.message,
+      actionLabel: row.action_label,
+      targetView: row.target_view,
+      entityId: row.entity_id,
+      detectedAt: row.detected_at,
+      metadata: row.metadata || {}
+    }),
     reportRecipients: (row) => ({
       id: row.id,
       recipientName: row.recipient_name,
@@ -610,6 +622,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         customerConfirmations,
         organizationMemberships,
         dataCoverage,
+        systemHealthAlerts,
         operationalEvidence
       ] =
         await Promise.all([
@@ -638,6 +651,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           this.getCustomerConfirmations(),
           this.getOrganizationMemberships(),
           this.getDataCoverage(),
+          this.getSystemHealthAlerts(),
           this.getOperationalEvidence()
         ]);
       const [supplierDispatches, supplierContacts, contacts, contactEmails, contactAliases, contactCandidates] = await Promise.all([
@@ -858,6 +872,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         contactAliases,
         contactCandidates,
         dataCoverage,
+        systemHealthAlerts,
         operationalEvidence,
         reviewQueue,
         reviewSummary: {
@@ -919,6 +934,12 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       return mapRows(
         "dataCoverage",
         await request("data_source_coverage?select=*&order=category.asc,label.asc")
+      );
+    },
+    async getSystemHealthAlerts() {
+      return mapRows(
+        "systemHealthAlerts",
+        await request("system_health_alerts?select=*&order=severity.asc,detected_at.desc")
       );
     },
     async getOperationalEvidence() {

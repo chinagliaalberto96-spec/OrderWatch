@@ -786,7 +786,7 @@ export default function App() {
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
           {activeView === "invoices" && <InvoicesView config={config} invoices={filteredData.invoices} />}
           {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} focusEmailId={drilldown.emailId} />}
-          {activeView === "reminders" && <NotificationsView config={config} data={filteredData} />}
+          {activeView === "reminders" && <NotificationsView config={config} data={filteredData} onNavigate={handleNavigate} />}
           {activeView === "settings" && (
             <SettingsView
               config={config}
@@ -798,6 +798,7 @@ export default function App() {
               onSaveMailbox={handleSaveMailbox}
               onTestMailbox={handleTestMailbox}
               onDisconnectMailbox={handleDisconnectMailbox}
+              onNavigate={handleNavigate}
               meta={{
                 mode: USES_MOCK_DATA ? "mock" : "live",
                 lastUpdated,
