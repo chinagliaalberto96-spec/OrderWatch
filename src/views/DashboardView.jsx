@@ -212,7 +212,14 @@ export default function DashboardView({
     return bv - av;
   });
 
-  const selectedSourceEmailId = selectedItem?.sourceEmailId || (selectedItem?.kind === "processed_email" ? selectedItem.entityId : null);
+  const selectedLineItems = selectedItem?.lineItems || [];
+  const selectedEntityIds = new Set([
+    selectedItem?.entityId,
+    ...selectedLineItems.map((line) => line.entityId)
+  ].filter(Boolean));
+  const selectedSourceEmailId = selectedItem?.sourceEmailId ||
+    selectedLineItems.find((line) => line.sourceEmailId)?.sourceEmailId ||
+    (selectedItem?.kind === "processed_email" ? selectedItem.entityId : null);
   const selectedSourceEmail = selectedSourceEmailId
     ? (data.processedEmails || []).find((email) => email.id === selectedSourceEmailId) || null
     : null;
@@ -222,6 +229,8 @@ export default function DashboardView({
   const selectedSourceDocuments = selectedSourceEmailId
     ? (data.documents || []).filter((document) => document.sourceEmailId === selectedSourceEmailId)
     : [];
+  const selectedEvidenceRevisions = (data.materialLineRevisions || [])
+    .filter((revision) => selectedEntityIds.has(revision.materialLineId));
 
   const upcomingArrivals = (essentialMode ? (data.materialLines || []).map((line) => ({
     ...line,
@@ -525,6 +534,7 @@ export default function DashboardView({
           sourceEmail={selectedSourceEmail}
           evidenceLines={selectedEvidenceLines}
           sourceDocuments={selectedSourceDocuments}
+          evidenceRevisions={selectedEvidenceRevisions}
         />
       )}
     </div>
@@ -657,7 +667,8 @@ function ActionDrawer({
   hiddenMode = false,
   sourceEmail,
   evidenceLines = [],
-  sourceDocuments = []
+  sourceDocuments = [],
+  evidenceRevisions = []
 }) {
   const tone = priorityTone(item.priority);
   const color = toneColor(tone);
@@ -726,11 +737,13 @@ function ActionDrawer({
             />
           </div>
 
-          {(sourceEmail || evidenceLines.length > 0 || sourceDocuments.length > 0) && (
+          {(sourceEmail || evidenceLines.length > 0 || sourceDocuments.length > 0 || evidenceRevisions.length > 0 || item.kind !== "operational_action") && (
             <SourceEvidence
+              item={item}
               email={sourceEmail}
               lines={evidenceLines}
               documents={sourceDocuments}
+              revisions={evidenceRevisions}
               onOpenSource={onOpenFull}
             />
           )}
@@ -985,8 +998,20 @@ function ActionDrawer({
   );
 }
 
-function SourceEvidence({ email, lines = [], documents = [], onOpenSource }) {
+function SourceEvidence({ item, email, lines = [], documents = [], revisions = [], onOpenSource }) {
   const isOther = String(email?.classification || "").toUpperCase() === "OTHER";
+  const observedRows = revisions
+    .map((revision) => revision.newValues || {})
+    .filter((values) => values.description || values.item_code || values.quantity || values.due_date || values.required_date);
+  const fallbackRows = observedRows.length ? observedRows : (!email && item ? [{
+    description: item.title,
+    item_code: item.itemCode,
+    quantity: item.quantity,
+    unit: item.unit,
+    due_date: item.dueDate,
+    confidence: item.confidence
+  }] : []);
+  const rows = lines.length ? lines : fallbackRows;
 
   return (
     <section className="overflow-hidden rounded-md border" style={{ borderColor: "var(--color-border)" }}>
@@ -994,11 +1019,13 @@ function SourceEvidence({ email, lines = [], documents = [], onOpenSource }) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-[11px] font-semibold uppercase" style={{ color: "var(--color-text-muted)" }}>Cosa ha trovato il sistema</div>
-            <div className="mt-0.5 text-[13px] font-semibold">Fonte e dati estratti dalla stessa email</div>
+            <div className="mt-0.5 text-[13px] font-semibold">{email ? "Fonte e dati estratti dalla stessa email" : "Dati disponibili prima del collegamento"}</div>
           </div>
-          <button type="button" onClick={onOpenSource} className="shrink-0 text-[11px] font-semibold hover:underline" style={{ color: "var(--color-accent)" }}>
-            Apri fonte
-          </button>
+          {email && (
+            <button type="button" onClick={onOpenSource} className="shrink-0 text-[11px] font-semibold hover:underline" style={{ color: "var(--color-accent)" }}>
+              Apri fonte
+            </button>
+          )}
         </div>
       </div>
 
@@ -1028,23 +1055,23 @@ function SourceEvidence({ email, lines = [], documents = [], onOpenSource }) {
         </div>
       )}
 
-      {lines.length > 0 ? (
+      {rows.length > 0 ? (
         <div className="border-t" style={{ borderColor: "var(--color-border)" }}>
           <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase" style={{ color: "var(--color-text-muted)" }}>
-            Righe estratte ({lines.length})
+            {email ? "Righe estratte" : "Dati rilevati"} ({rows.length})
           </div>
           <div className="divide-y" style={{ borderColor: "var(--color-border)" }}>
-            {lines.map((line) => {
+            {rows.map((line, index) => {
               const confidence = Number(line.confidence);
               return (
-                <div key={line.id} className="px-3 py-2">
+                <div key={line.id || `${line.description || "dato"}-${index}`} className="px-3 py-2">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-[12.5px] font-semibold">{line.description || "Descrizione non riconosciuta"}</div>
                       <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>
-                        {line.itemCode && <span>Cod. {line.itemCode}</span>}
+                        {(line.itemCode || line.item_code) && <span>Cod. {line.itemCode || line.item_code}</span>}
                         {line.quantity && <span>{line.quantity}{line.unit ? ` ${line.unit}` : ""}</span>}
-                        {(line.dueDate || line.requiredDate) && <span>Data {formatDate(line.dueDate || line.requiredDate)}</span>}
+                        {(line.dueDate || line.requiredDate || line.due_date || line.required_date) && <span>Data {formatDate(line.dueDate || line.requiredDate || line.due_date || line.required_date)}</span>}
                       </div>
                     </div>
                     {Number.isFinite(confidence) && (
