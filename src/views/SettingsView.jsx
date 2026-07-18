@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Bell,
   CheckCircle2,
   ChevronDown,
@@ -96,6 +97,43 @@ function HealthRow({ label, description, status, tone = "success", icon: Icon = 
       <span className="justify-self-end text-[12.5px] font-semibold" style={{ color: `var(--color-${tone})` }}>
         {status}
       </span>
+    </div>
+  );
+}
+
+const coverageStatus = {
+  available: { label: "Disponibile", tone: "success", icon: CheckCircle2 },
+  partial: { label: "Parziale", tone: "warning", icon: AlertTriangle },
+  unavailable: { label: "Non disponibile", tone: "danger", icon: AlertTriangle }
+};
+
+function CoverageRow({ item }) {
+  const meta = coverageStatus[item.status] || coverageStatus.partial;
+  const Icon = meta.icon;
+
+  return (
+    <div className="grid gap-2 border-b py-3.5 last:border-b-0 md:grid-cols-[20px_minmax(0,1fr)_150px] md:gap-3" style={{ borderColor: "var(--color-border)" }}>
+      <Icon className="mt-0.5 h-4 w-4" style={{ color: `var(--color-${meta.tone})` }} />
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[13.5px] font-semibold">{item.label}</span>
+          <span className="text-[11.5px]" style={{ color: "var(--color-text-muted)" }}>{item.category}</span>
+        </div>
+        <div className="mt-0.5 text-[12.5px]" style={{ color: "var(--color-text-muted)" }}>
+          {item.message}
+        </div>
+        {item.limitation && (
+          <div className="mt-1 text-[12.5px] font-medium" style={{ color: `var(--color-${meta.tone})` }}>
+            Limite: {item.limitation}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-2 md:justify-self-end">
+        <span className="text-[11.5px] tabular-nums" style={{ color: "var(--color-text-muted)" }}>
+          {Math.round(item.reliability * 100)}%
+        </span>
+        <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+      </div>
     </div>
   );
 }
@@ -1358,6 +1396,7 @@ export default function SettingsView({
   const documents = data.documents || [];
   const appUsers = data.appUsers || [];
   const mailboxes = data.mailboxes || [];
+  const dataCoverage = data.dataCoverage || [];
   const reportRecipients = data.reportRecipients || [];
   const latestImport = getLatestDate(processedEmails, "receivedAt");
   const latestActivity = getLatestDate(data.activities || [], "date");
@@ -1534,6 +1573,26 @@ export default function SettingsView({
               <HealthRow key={row.label} {...row} />
             ))}
           </div>
+        </Section>
+
+        <Section
+          title="Copertura dati"
+          hint={`${dataCoverage.filter((item) => item.status === "available").length}/${dataCoverage.length || 0} fonti disponibili`}
+          defaultOpen
+        >
+          <div className="mb-2 rounded-md p-3 text-[12.5px]" style={{ backgroundColor: "var(--color-muted)" }}>
+            <span className="font-semibold">Cosa puo sapere OrderWatch. </span>
+            <span style={{ color: "var(--color-text-muted)" }}>
+              Le conclusioni operative tengono conto delle fonti realmente osservabili. Una fonte parziale non viene trattata come prova di assenza.
+            </span>
+          </div>
+          {dataCoverage.length ? (
+            <div>
+              {dataCoverage.map((item) => <CoverageRow key={item.sourceKey} item={item} />)}
+            </div>
+          ) : (
+            <EmptyState>Copertura non ancora calcolata.</EmptyState>
+          )}
         </Section>
 
         <Section

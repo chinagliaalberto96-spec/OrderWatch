@@ -397,6 +397,20 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       hasPassword: Boolean(row.encrypted_password),
       notes: row.notes
     }),
+    dataCoverage: (row) => ({
+      sourceKey: row.source_key,
+      category: row.category,
+      label: row.label,
+      status: row.status,
+      reliability: Number(row.reliability || 0),
+      observedCount: Number(row.observed_count || 0),
+      lastObservedAt: row.last_observed_at,
+      availableSources: Number(row.available_sources || 0),
+      configuredSources: Number(row.configured_sources || 0),
+      message: row.message,
+      limitation: row.limitation,
+      metadata: row.metadata || {}
+    }),
     reportRecipients: (row) => ({
       id: row.id,
       recipientName: row.recipient_name,
@@ -570,7 +584,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         contractProgressReports,
         contractBillingItems,
         customerConfirmations,
-        organizationMemberships
+        organizationMemberships,
+        dataCoverage
       ] =
         await Promise.all([
           this.getOrders(),
@@ -596,7 +611,8 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
           this.getContractProgressReports(),
           this.getContractBillingItems(),
           this.getCustomerConfirmations(),
-          this.getOrganizationMemberships()
+          this.getOrganizationMemberships(),
+          this.getDataCoverage()
         ]);
       const [supplierDispatches, supplierContacts, contacts, contactEmails, contactAliases, contactCandidates] = await Promise.all([
         this.getSupplierDispatches(),
@@ -783,6 +799,7 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         contactEmails,
         contactAliases,
         contactCandidates,
+        dataCoverage,
         reviewQueue,
         reviewSummary: {
           total: reviewQueue.length,
@@ -838,6 +855,12 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
     },
     async getMailboxes() {
       return mapRows("mailboxes", await request("mailboxes?select=*&order=mailbox_name.asc"));
+    },
+    async getDataCoverage() {
+      return mapRows(
+        "dataCoverage",
+        await request("data_source_coverage?select=*&order=category.asc,label.asc")
+      );
     },
     async getReportRecipients() {
       return mapRows("reportRecipients", await request("report_recipients?select=*&order=recipient_name.asc"));
