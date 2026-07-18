@@ -1,5 +1,98 @@
 import { getWorkflowPolicy } from "../config/workflowModes.js";
 
+function extractEmailAddress(value) {
+  const text = String(value || "").trim().toLowerCase();
+  const bracketed = text.match(/<([^>]+)>/);
+  return (bracketed?.[1] || text).trim();
+}
+
+function normalizeConversationSubject(value) {
+  let subject = String(value || "").trim().toLowerCase();
+  let previous;
+  do {
+    previous = subject;
+    subject = subject
+      .replace(/^\s*\[(?:ext|external)\]\s*/i, "")
+      .replace(/^\s*(?:re|r|fw|fwd|i|inoltro)\s*:\s*/i, "");
+  } while (subject !== previous);
+  return subject.replace(/\s+/g, " ").trim();
+}
+
+function normalizePartyName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function partyConversationKey(item) {
+  const subject = normalizeConversationSubject(item.sourceSubject);
+  if (!subject) return null;
+  const party = item.contactId || item.customerName || item.supplierName;
+  return party ? `${String(party).toLowerCase()}|${subject}` : null;
+}
+
+function latestByDate(rows, dateSelector) {
+  return [...rows].sort((a, b) => {
+    const aTime = new Date(dateSelector(a) || 0).getTime();
+    const bTime = new Date(dateSelector(b) || 0).getTime();
+    return bTime - aTime;
+  })[0];
+}
+
+function consolidateQuotesForQueue(quotes = []) {
+  const groups = new Map();
+  for (const quote of quotes) {
+    const subject = normalizeConversationSubject(quote.sourceSubject);
+    if (!subject) {
+      groups.set(`quote:${quote.id}`, [quote]);
+      continue;
+    }
+    const party = quote.contactId || quote.customerName || quote.supplierName || "unknown";
+    const key = [String(party).toLowerCase(), quote.projectCode || "-", quote.quoteType || "-", subject].join("|");
+    groups.set(key, [...(groups.get(key) || []), quote]);
+  }
+  return [...groups.values()].map((rows) => latestByDate(rows, (row) => row.createdAt));
+}
+
+function isOperationalBuyerAction(action) {
+  const type = String(action.sourceClassificationType || "").toUpperCase();
+  return !new Set([
+    "NOISE",
+    "OTHER",
+    "SUPPLIER_INVOICE",
+    "SUPPLIER_PAYMENT_REMINDER",
+    "CUSTOMER_PAYMENT_REMINDER"
+  ]).has(type);
+}
+
+function isOperationalArtifactSource(type) {
+  return !new Set([
+    "NOISE",
+    "OTHER",
+    "SUPPLIER_INVOICE",
+    "SUPPLIER_PAYMENT_REMINDER",
+    "CUSTOMER_PAYMENT_REMINDER"
+  ]).has(String(type || "").toUpperCase());
+}
+
+function consolidateBuyerActionsForQueue(actions = []) {
+  const groups = new Map();
+  for (const action of actions.filter(isOperationalBuyerAction)) {
+    const subject = normalizeConversationSubject(action.sourceSubject);
+    if (!subject) {
+      groups.set(`action:${action.id}`, [action]);
+      continue;
+    }
+    const party = action.contactId || action.customerName || action.supplierName || "unknown";
+    const key = [String(party).toLowerCase(), action.projectCode || "-", action.orderCode || "-", subject].join("|");
+    groups.set(key, [...(groups.get(key) || []), action]);
+  }
+  return [...groups.values()].map((rows) => latestByDate(rows, (row) => row.actionAt || row.createdAt));
+}
+
 // Adapter Supabase per il backend prodotto. SOLO SERVER-SIDE: usa la service
 // key, che non deve mai arrivare al browser. Airtable resta un fallback tecnico
 // server-side, ma il prodotto ufficiale usa questa sorgente.
@@ -251,6 +344,9 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       preClassification: row.pre_classification,
       finalClassification: row.final_classification,
       classificationType: row.classification_type,
+      classificationOrigin: row.classification_origin,
+      contactId: row.contact_id,
+      threadId: row.thread_id,
       skippedReason: row.skipped_reason,
       confidence: row.confidence,
       needsReview: Boolean(row.needs_review),
@@ -341,6 +437,9 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       confidence: row.confidence,
       needsReview: Boolean(row.needs_review),
       sourceEmailId: row.source_email_id,
+      contactId: row.contact_id,
+      sourceThreadId: row.source_thread_id,
+      canonicalKey: row.canonical_key,
       notes: row.notes,
       createdAt: row.created_at
     }),
@@ -523,25 +622,128 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         responsibleName: userByMembership.get(action.assignedMembershipId)?.fullName || null,
         projectCode: projects.find((project) => project.id === action.projectId)?.projectCode || null
       }));
+      const emailById = new Map(processedEmails.map((email) => [email.id, email]));
+      const contactById = new Map(contacts.map((contact) => [contact.id, contact]));
+      const activeContactByName = new Map();
+      for (const contact of contacts.filter((item) => item.status === "active")) {
+        activeContactByName.set(normalizePartyName(contact.legalName), contact);
+      }
+      for (const alias of contactAliases) {
+        const contact = contactById.get(alias.contactId);
+        if (contact?.status === "active") activeContactByName.set(normalizePartyName(alias.alias), contact);
+      }
+      const resolveContactByName = (name) => activeContactByName.get(normalizePartyName(name)) || null;
+      const enrichNamedCounterparty = (entity) => {
+        const sourceName = entity.customerName || entity.supplierName;
+        const explicitContact = entity.contactId ? contactById.get(entity.contactId) : null;
+        const contact = explicitContact?.status === "active" ? explicitContact : resolveContactByName(sourceName);
+        if (!contact) return entity;
+        const customerSide = Boolean(entity.customerName);
+        return {
+          ...entity,
+          contactId: contact.id,
+          counterpartyType: customerSide ? "customer" : "supplier",
+          customerName: customerSide ? contact.legalName : entity.customerName,
+          supplierName: customerSide ? entity.supplierName : contact.legalName
+        };
+      };
+      const contactIdByEmail = new Map(
+        contactEmails
+          .filter((entry) => entry.matchEnabled !== false)
+          .map((entry) => [String(entry.email || "").trim().toLowerCase(), entry.contactId])
+      );
+      const contactIdsByThread = new Map();
+      for (const email of processedEmails) {
+        const contact = email.contactId ? contactById.get(email.contactId) : null;
+        if (!email.threadId || contact?.status !== "active") continue;
+        const ids = contactIdsByThread.get(email.threadId) || new Set();
+        ids.add(email.contactId);
+        contactIdsByThread.set(email.threadId, ids);
+      }
+      const contactIdByThread = new Map(
+        [...contactIdsByThread.entries()]
+          .filter(([, ids]) => ids.size === 1)
+          .map(([threadId, ids]) => [threadId, [...ids][0]])
+      );
+      const genericDomains = new Set(["gmail.com", "outlook.com", "hotmail.com", "icloud.com", "yahoo.com", "libero.it"]);
+      const contactIdsByDomain = new Map();
+      for (const entry of contactEmails.filter((item) => item.matchEnabled !== false)) {
+        const domain = extractEmailAddress(entry.email).split("@")[1];
+        const contact = contactById.get(entry.contactId);
+        if (!domain || genericDomains.has(domain) || contact?.status !== "active") continue;
+        const ids = contactIdsByDomain.get(domain) || new Set();
+        ids.add(entry.contactId);
+        contactIdsByDomain.set(domain, ids);
+      }
+      const contactIdByDomain = new Map(
+        [...contactIdsByDomain.entries()]
+          .filter(([, ids]) => ids.size === 1)
+          .map(([domain, ids]) => [domain, [...ids][0]])
+      );
+      const enrichedBuyerActions = buyerActions.map((action) => {
+        const sourceEmail = emailById.get(action.sourceEmailId);
+        const address = extractEmailAddress(sourceEmail?.from);
+        const domain = address.split("@")[1];
+        // Una singola email storica puo' non avere contact_id anche quando un
+        // altro messaggio della stessa conversazione e' gia' stato associato.
+        // Ereditiamo il contatto solo se nel thread ne esiste esattamente uno:
+        // in presenza di ambiguita' lasciamo l'azione da identificare.
+        const contactId = sourceEmail?.contactId ||
+          contactIdByThread.get(sourceEmail?.threadId) ||
+          contactIdByEmail.get(address) ||
+          contactIdByDomain.get(domain) ||
+          null;
+        const contact = contactById.get(contactId);
+        const origin = String(sourceEmail?.classificationOrigin || "").toUpperCase();
+        const contactName = contact?.legalName || null;
+
+        return {
+          ...action,
+          contactId,
+          counterpartyType: origin === "CUSTOMER" ? "customer" : origin === "SUPPLIER" ? "supplier" : null,
+          customerName: origin === "CUSTOMER" ? contactName : null,
+          supplierName: action.supplierName || (origin === "SUPPLIER" ? contactName : null),
+          sourceSubject: sourceEmail?.subject || null,
+          sourceClassificationOrigin: origin || null,
+          sourceClassificationType: sourceEmail?.classificationType || null
+        };
+      });
+      const enrichedQuotes = quotes.map((quote) => {
+        const sourceEmail = emailById.get(quote.sourceEmailId);
+        const contactId = quote.contactId || sourceEmail?.contactId || null;
+        const contact = contactById.get(contactId);
+        const isCustomer = quote.quoteType === "customer_quote_request" || sourceEmail?.classificationOrigin === "CUSTOMER";
+        const isSupplier = quote.quoteType === "supplier_quote" || sourceEmail?.classificationOrigin === "SUPPLIER";
+        return enrichNamedCounterparty({
+          ...quote,
+          contactId,
+          customerName: isCustomer && contact?.legalName ? contact.legalName : quote.customerName,
+          supplierName: isSupplier && contact?.legalName ? contact.legalName : quote.supplierName,
+          sourceSubject: sourceEmail?.subject || null,
+          sourceClassificationType: sourceEmail?.classificationType || null
+        });
+      });
+      const enrichedMaterialLines = materialLines.map(enrichNamedCounterparty);
+      const enrichedDeliveryNotes = deliveryNotes.map(enrichNamedCounterparty);
       const traceabilityMode = settingsMap["workflow.traceability_mode"] || "required_link";
       const visibleOrders = traceabilityMode === "supplier_only"
         ? orders.filter((order) => !/^(GCG-AI-|DDT-)/i.test(String(order.orderCode || "")))
         : orders;
       const operationalQueue = buildOperationalQueue({
-        materialLines,
-        quotes,
-        deliveryNotes,
+        materialLines: enrichedMaterialLines,
+        quotes: enrichedQuotes,
+        deliveryNotes: enrichedDeliveryNotes,
         invoices,
         processedEmails,
-        buyerActions,
+        buyerActions: enrichedBuyerActions,
         operationalActions: enrichedOperationalActions,
         customerConfirmations,
         supplierDispatches,
         settingsMap
       });
       const operationalSuggestions = buildOperationalSuggestions({
-        materialLines,
-        deliveryNotes,
+        materialLines: enrichedMaterialLines,
+        deliveryNotes: enrichedDeliveryNotes,
         invoices,
         settingsMap
       });
@@ -560,10 +762,10 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
         appUsers: appUsersWithMembership,
         mailboxes,
         reportRecipients,
-        quotes,
-        deliveryNotes,
+        quotes: enrichedQuotes,
+        deliveryNotes: enrichedDeliveryNotes,
         invoices,
-        buyerActions,
+        buyerActions: enrichedBuyerActions,
         operationalActions: enrichedOperationalActions,
         contractProgressReports,
         contractBillingItems,
@@ -616,7 +818,10 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
       return mapRows("dailyReports", await request("daily_reports?select=*&order=report_date.desc&limit=90"));
     },
     async getProcessedEmails() {
-      return mapRows("processedEmails", await request("processed_emails?select=*&order=received_at.desc&limit=200"));
+      // Le azioni aperte possono riferirsi a conversazioni meno recenti. Con
+      // 200 record la relativa email spariva dal dataset e la controparte non
+      // era piu' risolvibile, pur essendo presente in anagrafica.
+      return mapRows("processedEmails", await request("processed_emails?select=*&order=received_at.desc&limit=500"));
     },
     async getSettings() {
       return mapRows("settings", await request('settings?select=*&order="group".asc,key.asc'));
@@ -777,6 +982,7 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
   const workflowPolicy = getWorkflowPolicy(traceabilityMode);
   const confirmationByEmail = new Map((customerConfirmations || []).map((item) => [item.sourceEmailId, item]));
   const customerEmailSeen = new Set();
+  const processedEmailById = new Map((processedEmails || []).map((email) => [email.id, email]));
   // Righe gia' coperte da un dispatch ordine fornitore attivo: non riproporle come "da ordinare".
   const linesWithActiveDispatch = new Set(
     (supplierDispatches || [])
@@ -788,6 +994,7 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
     // ogni riga come attivita' separata produrrebbe due verita' per lo stesso
     // fatto (preventivo + righe preventivo, DDT + righe DDT).
     .filter((line) => ["project_requirement", "purchase_order_line"].includes(line.entityKind))
+    .filter((line) => isOperationalArtifactSource(processedEmailById.get(line.sourceEmailId)?.classificationType))
     .flatMap((line) => {
       const exposeConfirmation = line.sourceType === "customer_request" && line.sourceEmailId && !customerEmailSeen.has(line.sourceEmailId);
       if (exposeConfirmation) customerEmailSeen.add(line.sourceEmailId);
@@ -799,17 +1006,27 @@ export function buildOperationalQueue({ materialLines, quotes, deliveryNotes, in
         settingsMap["workflow.traceability_mode"] || "required_link"
       );
     });
+  const queueQuotes = consolidateQuotesForQueue(quotes.filter((quote) => isOperationalArtifactSource(quote.sourceClassificationType)));
+  const quoteConversationKeys = new Set(queueQuotes.map(partyConversationKey).filter(Boolean));
+  const queueBuyerActions = consolidateBuyerActionsForQueue(
+    buyerActions.filter((action) => action.status !== "done")
+  ).filter((action) => {
+    const key = partyConversationKey(action);
+    // Se la stessa conversazione ha gia' prodotto un preventivo azionabile,
+    // la generica buyer_action non deve creare una seconda verita' in Oggi.
+    return !key || !quoteConversationKeys.has(key);
+  });
 
   const items = [
     ...materialItems,
-    ...quotes.flatMap(quoteToOperationalItems),
+    ...queueQuotes.flatMap(quoteToOperationalItems),
     ...deliveryNotes.flatMap((note) => deliveryNoteToOperationalItems(note, traceabilityMode)),
     // Errori/importazioni in corso NON compaiono piu' nella coda "Oggi": sono
     // segnalazioni tecniche di sistema, non attivita' del buyer. Restano
     // visibili e verificabili nella vista Importazioni.
     // Le fatture non entrano nella coda "Oggi": non e' lo scope di OrderWatch
     // (nessuna gestione contabile/pagamenti). Restano nel tab Fatture dedicato.
-    ...buyerActions.filter((action) => action.status !== "done").map(actionToOperationalItem),
+    ...queueBuyerActions.map(actionToOperationalItem),
     ...operationalActions.filter((action) => action.status === "open").map(sharedActionToOperationalItem),
     // Gating backend: se il modulo ordini fornitore non e' nel piano del
     // cliente, questi item non compaiono affatto in coda.
@@ -949,6 +1166,8 @@ export function groupSupplierMaterialItems(items = []) {
       orderCode,
       projectCode: orderedLines.find((line) => line.projectCode)?.projectCode || null,
       supplierName,
+      contactId: orderedLines.find((line) => line.contactId)?.contactId || null,
+      counterpartyType: "supplier",
       confidence: confidenceValues.length ? Math.min(...confidenceValues) : null,
       date: orderedLines[0].date,
       sortDate: dueDate || orderedLines[0].sortDate,
@@ -1079,6 +1298,8 @@ function materialLineToOperationalItems(line, confirmation, exposeConfirmation =
     supplierId: line.supplierId,
     supplierName: line.supplierName,
     customerName: line.customerName,
+    contactId: line.contactId,
+    counterpartyType: line.counterpartyType,
     sourceType: line.sourceType,
     sourceEmailId: line.sourceEmailId,
     confirmation: confirmation || null,
@@ -1162,14 +1383,18 @@ function quoteToOperationalItems(quote) {
     title: quote.quoteCode || "Preventivo da gestire",
     subtitle: quote.supplierName || quote.customerName || quote.projectCode || "",
     detail: [
-      quote.notes || (quote.quoteType === "supplier" ? "Preventivo fornitore ricevuto." : "Richiesta preventivo cliente."),
+      quote.notes || (quote.quoteType === "supplier_quote" ? "Preventivo fornitore ricevuto." : "Richiesta preventivo cliente."),
       dateState?.label
     ].filter(Boolean).join(" · "),
-    actionLabel: quote.quoteType === "supplier" ? "Valuta preventivo" : "Prepara offerta",
+    actionLabel: quote.quoteType === "supplier_quote" ? "Valuta preventivo" : "Prepara offerta",
     dueDate: quote.validUntil,
     projectCode: quote.projectCode,
+    contactId: quote.contactId,
+    counterpartyType: quote.customerName ? "customer" : quote.supplierName ? "supplier" : null,
     supplierName: quote.supplierName,
     customerName: quote.customerName,
+    quoteType: quote.quoteType,
+    sourceEmailId: quote.sourceEmailId,
     confidence: quote.confidence,
     date: quote.createdAt,
     sortDate: quote.validUntil || quote.createdAt
@@ -1217,6 +1442,9 @@ function actionToOperationalItem(action) {
     projectCode: action.projectCode,
     orderCode: action.orderCode,
     supplierName: action.supplierName,
+    customerName: action.customerName,
+    contactId: action.contactId,
+    counterpartyType: action.counterpartyType,
     sourceEmailId: action.sourceEmailId,
     date: action.actionAt || action.createdAt,
     sortDate: action.actionAt || action.createdAt

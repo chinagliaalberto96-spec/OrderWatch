@@ -198,6 +198,18 @@ export default function DashboardView({
     [visibleQueue]
   );
 
+  const identifiedCounterpartyCount = useMemo(
+    () => allCounterpartyGroups.filter((group) => group.type !== "unassigned").length,
+    [allCounterpartyGroups]
+  );
+
+  const unassignedActivityCount = useMemo(
+    () => allCounterpartyGroups
+      .filter((group) => group.type === "unassigned")
+      .reduce((total, group) => total + group.items.length, 0),
+    [allCounterpartyGroups]
+  );
+
   const grouped = useMemo(() => {
     const groups = { urgent: [], high: [], medium: [], low: [] };
     for (const group of counterpartyGroups) {
@@ -354,7 +366,7 @@ export default function DashboardView({
               {filter === "hidden"
                 ? `${hiddenQueue.length} ${hiddenQueue.length === 1 ? "attività nascosta" : "attività nascoste"} fino a domani`
                 : counts.total
-                ? `${allCounterpartyGroups.length} ${allCounterpartyGroups.length === 1 ? "controparte" : "controparti"} · ${counts.total} attività da controllare oggi`
+                ? `${identifiedCounterpartyCount} clienti/fornitori · ${counts.total} attività da controllare oggi${unassignedActivityCount ? ` · ${unassignedActivityCount} da identificare` : ""}`
                 : "Tutto sotto controllo"}
             </h1>
             <p className="mt-0.5 text-sm" style={{ color: "var(--color-text-muted)" }}>
@@ -399,6 +411,8 @@ export default function DashboardView({
           {PRIORITY_GROUPS.map((group) => {
             const items = grouped[group.key];
             if (!items?.length) return null;
+            const identifiedCount = items.filter((item) => item.type !== "unassigned").length;
+            const hasUnassigned = items.some((item) => item.type === "unassigned");
             return (
               <section key={group.key}>
                 <div className="mb-2 flex items-center gap-2 px-1">
@@ -406,7 +420,11 @@ export default function DashboardView({
                   <h2 className="text-[13px] font-semibold uppercase tracking-wide" style={{ color: "var(--color-text-muted)" }}>
                     {group.label}
                   </h2>
-                  <span className="text-[13px] font-semibold" style={{ color: "var(--color-text-muted)" }}>· {items.length} {items.length === 1 ? "controparte" : "controparti"}</span>
+                  <span className="text-[13px] font-semibold" style={{ color: "var(--color-text-muted)" }}>
+                    {identifiedCount > 0
+                      ? `· ${identifiedCount} clienti/fornitori${hasUnassigned ? " · attività da identificare" : ""}`
+                      : "· Attività da identificare"}
+                  </span>
                 </div>
                 <div className="space-y-2">
                   {items.map((counterparty) => (
@@ -1035,7 +1053,7 @@ function SourceEvidence({ item, email, lines = [], documents = [], revisions = [
           <div className="flex flex-wrap gap-x-2 gap-y-1" style={{ color: "var(--color-text-muted)" }}>
             {!isOther && email.from && <span>Da: {email.from}</span>}
             {email.receivedAt && <span>{formatDate(email.receivedAt)}</span>}
-            {email.direction && <span>{email.direction === "outbound" ? "Inviata" : "Ricevuta"}</span>}
+            {email.direction && <span>{email.direction === "outbound" ? "Email in uscita" : "Email in entrata"}</span>}
             {(email.classificationType || email.classification) && <span>Tipo: {email.classificationType || email.classification}</span>}
             {email.attachmentCount > 0 && <span>{email.attachmentCount} {email.attachmentCount === 1 ? "allegato" : "allegati"}</span>}
           </div>

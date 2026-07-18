@@ -15,6 +15,18 @@ function normalizeKey(value) {
 }
 
 function counterpartyForItem(item) {
+  if (item.contactId && (item.supplierName || item.customerName)) {
+    const type = item.counterpartyType || (item.customerName ? "customer" : "supplier");
+    const label = item.customerName || item.supplierName;
+    return {
+      // Il nome canonico mantiene unite anche righe storiche che puntano a
+      // vecchi contact_id gia' confluiti nella stessa anagrafica.
+      key: `${type}:${normalizeKey(label)}`,
+      label,
+      type
+    };
+  }
+
   if (item.supplierName) {
     return {
       // In anagrafica possono ancora esistere record duplicati con ID diversi.
@@ -41,11 +53,11 @@ function counterpartyForItem(item) {
     };
   }
 
-  // Gli elementi senza una controparte certa restano separati: unirli sotto
-  // un'unica azienda fittizia renderebbe la coda fuorviante.
+  // Non e' una controparte: e' una sola coda di eccezioni da identificare.
+  // Usare l'ID dell'attivita' come chiave gonfiava il numero di aziende.
   return {
-    key: `unassigned:${item.id}`,
-    label: "Attività senza controparte",
+    key: "unassigned",
+    label: "Da identificare",
     type: "unassigned"
   };
 }
