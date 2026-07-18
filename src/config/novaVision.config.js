@@ -48,8 +48,7 @@ const novaVisionConfig = {
     ...baseConfig.theme
   },
   modules: {
-    ...baseConfig.modules,
-    receiving: false
+    ...baseConfig.modules
   },
   alertRules: {
     warningDays: 7,
