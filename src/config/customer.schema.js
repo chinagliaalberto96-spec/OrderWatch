@@ -38,6 +38,8 @@ export const customerConfigSchema = {
     "documents",
     "scorecard",
     "reminders",
+    "receiving",
+    "altera",
     "settings"
   ],
   alertRules: [

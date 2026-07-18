@@ -21,8 +21,8 @@ const APP_VIEWS_BY_ROLE = {
   Owner: "*",
   IT: "*",
   Admin: "*",
-  Buyer: new Set(["dashboard", "orders", "projects", "contract_watch", "suppliers", "quotes", "receiving", "documents", "invoices", "reminders"]),
-  ReadOnly: new Set(["dashboard", "projects", "receiving", "documents", "invoices", "reminders"])
+  Buyer: new Set(["dashboard", "orders", "projects", "contract_watch", "suppliers", "quotes", "receiving", "documents", "invoices", "reminders", "altera"]),
+  ReadOnly: new Set(["dashboard", "projects", "receiving", "documents", "invoices", "reminders", "altera"])
 };
 
 export function canAccessView(role, view) {

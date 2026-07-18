@@ -19,6 +19,7 @@ import ProjectsView from "./views/ProjectsView";
 import ContractProjectsView from "./views/ContractProjectsView";
 import QuotesView from "./views/QuotesView";
 import ReceivingView from "./views/ReceivingView";
+import AlteraView from "./views/AlteraView";
 import SettingsView from "./views/SettingsView";
 import SuppliersView from "./views/SuppliersView";
 import ContactsView from "./views/ContactsView";
@@ -41,6 +42,7 @@ const viewLabels = (terminology) => ({
   imports: terminology.importsPlural || "Importazioni",
   reminders: "Notifiche",
   receiving: "Ricevimenti",
+  altera: "Altera",
   settings: "Impostazioni"
 });
 
@@ -188,7 +190,7 @@ export default function App() {
 
   const navItems = useMemo(
     () =>
-      ["dashboard", "orders", "projects", "contract_watch", "suppliers", "contacts", "quotes", "receiving", "documents", "invoices", "imports", "reminders", "settings"]
+      ["dashboard", "altera", "orders", "projects", "contract_watch", "suppliers", "contacts", "quotes", "receiving", "documents", "invoices", "imports", "reminders", "settings"]
         .filter((key) => (config.modules[key] || backendModuleFlags[key] === true) && backendModuleFlags[key] !== false)
         .filter((key) => canAccessView(sessionUser?.role, key))
         .map((key) => ({ key, label: labels[key] })),
@@ -789,7 +791,8 @@ export default function App() {
               onVerifyQuote={canWriteOperationalData(sessionUser?.role) ? handleVerifyOperationalItem : null}
             />
           )}
-          {activeView === "receiving" && <ReceivingView adapter={adapter} readOnly={sessionUser?.role === "ReadOnly"} />}
+          {activeView === "receiving" && <ReceivingView adapter={adapter} readOnly={sessionUser?.role === "ReadOnly"} focusDeliveryNoteId={drilldown.deliveryNoteId} />}
+          {activeView === "altera" && <AlteraView adapter={adapter} onNavigate={handleNavigate} />}
           {activeView === "documents" && <DocumentsView config={config} documents={filteredData.documents} />}
           {activeView === "invoices" && <InvoicesView config={config} invoices={filteredData.invoices} />}
           {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} focusEmailId={drilldown.emailId} />}

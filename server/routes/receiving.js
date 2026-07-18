@@ -14,7 +14,9 @@ async function moduleEnabled(organizationId) {
   const rows = await supabaseRequest(
     `settings?key=eq.modules.receiving&${orgFilter(organizationId)}&select=value,status&limit=1`
   );
-  return rows?.[0]?.status === "active" && String(rows[0].value).toLowerCase() === "true";
+  const setting = rows?.[0];
+  if (!setting) return true;
+  return setting.status === "active" && String(setting.value).toLowerCase() === "true";
 }
 
 async function settingNumber(key, fallback, organizationId) {

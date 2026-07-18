@@ -146,3 +146,24 @@ service role. `anon` and `authenticated` have no direct access.
 
 Add learning only from explicit, traceable corrections; never learn from a
 hidden or unverified automatic decision.
+
+## Conversational interface (18 July 2026)
+
+Altera is now available as a tenant-scoped, read-only operational chat inside
+the dashboard. Conversations and messages are persisted server-side and are
+associated with the active organization and user context.
+
+The assistant reads current orders, projects, suppliers, canonical operational
+lines, delivery notes, invoices, quotes, buyer actions, source coverage, and
+system health. Each operational statement can expose a validated citation that
+opens the corresponding OrderWatch view. References invented by the model are
+discarded by the server.
+
+Delivery-note questions use DDT line counts and receipt allocations, rather
+than the generic operational-linking ratio. A production check correctly
+identified the two Graphic Center DDTs still requiring receipt linkage and
+returned navigable references to the Receiving view.
+
+The interface is deliberately read-only. It cannot change statuses, confirm
+receipts, create links, or update quantities. Those actions remain in their
+specific operational modules and retain the buyer confirmation gate.

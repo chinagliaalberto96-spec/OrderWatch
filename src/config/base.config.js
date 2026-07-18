@@ -70,7 +70,8 @@ const baseConfig = {
     invoices: true,
     scorecard: true,
     reminders: true,
-    receiving: false,
+    receiving: true,
+    altera: true,
     settings: true
   },
   alertRules: {

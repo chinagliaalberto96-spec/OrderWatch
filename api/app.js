@@ -11,8 +11,11 @@ import procurementRequirementsHandler from "../server/routes/procurement-require
 import receivingHandler from "../server/routes/receiving.js";
 import supplierOrdersHandler from "../server/routes/supplier-orders.js";
 import suppliersHandler from "../server/routes/suppliers.js";
+import alteraHandler from "../server/routes/altera.js";
+import telegramConnectionsHandler from "../server/routes/telegram-connections.js";
 
 const handlers = {
+  altera: alteraHandler,
   contacts: contactsHandler,
   "contract-billing-items": contractBillingItemsHandler,
   "contract-progress-reports": contractProgressReportsHandler,
@@ -25,7 +28,8 @@ const handlers = {
   "procurement-requirements": procurementRequirementsHandler,
   receiving: receivingHandler,
   "supplier-orders": supplierOrdersHandler,
-  suppliers: suppliersHandler
+  suppliers: suppliersHandler,
+  "telegram-connections": telegramConnectionsHandler
 };
 
 export default async function handler(request, response) {

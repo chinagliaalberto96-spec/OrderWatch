@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/settings", "destination": "/api/admin?route=settings" },
+    { "source": "/api/altera", "destination": "/api/app?route=altera" },
     { "source": "/api/app-users", "destination": "/api/admin?route=app-users" },
     { "source": "/api/report-recipients", "destination": "/api/admin?route=report-recipients" },
     { "source": "/api/contacts", "destination": "/api/app?route=contacts" },
@@ -14,6 +15,7 @@
     { "source": "/api/projects", "destination": "/api/app?route=projects" },
     { "source": "/api/receiving", "destination": "/api/app?route=receiving" },
     { "source": "/api/supplier-orders", "destination": "/api/app?route=supplier-orders" },
-    { "source": "/api/suppliers", "destination": "/api/app?route=suppliers" }
+    { "source": "/api/suppliers", "destination": "/api/app?route=suppliers" },
+    { "source": "/api/telegram-connections", "destination": "/api/app?route=telegram-connections" }
   ]
 }

@@ -1,4 +1,4 @@
-import { BarChart3, Bell, Boxes, BriefcaseBusiness, ContactRound, FileSearch, FileText, Inbox, LayoutDashboard, PackageCheck, Receipt, Settings, Truck } from "lucide-react";
+import { BarChart3, Bell, Boxes, BriefcaseBusiness, ContactRound, FileSearch, FileText, Inbox, LayoutDashboard, PackageCheck, Receipt, Settings, Sparkles, Truck } from "lucide-react";
 import OrderWatchMark, { SIDEBAR_INK } from "./OrderWatchMark";
 
 // Sidebar v3 (giugno 2026): identita' sempre OrderWatch (nessun nome/colore
@@ -20,6 +20,7 @@ const icons = {
   imports: Inbox,
   reminders: Bell,
   receiving: PackageCheck,
+  altera: Sparkles,
   settings: Settings
 };
 
@@ -28,7 +29,7 @@ const icons = {
 // blocco di 10-12 voci identiche. Le chiavi non presenti in navItems (modulo
 // disattivato o ruolo senza accesso) spariscono semplicemente dalla sezione.
 const NAV_SECTIONS = [
-  { label: "Operativo", keys: ["dashboard", "orders", "projects", "contract_watch", "receiving"] },
+  { label: "Operativo", keys: ["dashboard", "altera", "orders", "projects", "contract_watch", "receiving"] },
   { label: "Fornitori e documenti", keys: ["suppliers", "contacts", "quotes", "documents", "invoices", "imports"] },
   { label: "Sistema", keys: ["reminders", "settings"] }
 ];

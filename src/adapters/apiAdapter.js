@@ -42,6 +42,33 @@ export function createApiAdapter(dataSource, { getAccessToken } = {}) {
       return parseOrThrow(response, "Receiving action API");
     },
 
+    async getAlteraChat(conversationId = null) {
+      const query = conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : "";
+      const response = await apiFetch(`/api/altera${query}`);
+      return parseOrThrow(response, "Altera API");
+    },
+
+    async askAltera(question, conversationId = null) {
+      const response = await apiFetch("/api/altera", {
+        method: "POST",
+        body: JSON.stringify({ question, conversationId })
+      });
+      return parseOrThrow(response, "Altera API");
+    },
+
+    async getTelegramConnections() {
+      const response = await apiFetch("/api/telegram-connections");
+      return parseOrThrow(response, "Telegram DDT API");
+    },
+
+    async telegramConnectionAction(payload) {
+      const response = await apiFetch("/api/telegram-connections", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      return parseOrThrow(response, "Telegram DDT API");
+    },
+
     async updateSetting(id, fields) {
       const response = await apiFetch(`/api/settings${suffix}`, {
         method: "PATCH",
