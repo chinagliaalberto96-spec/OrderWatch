@@ -41,6 +41,10 @@ export default function ContactsView({ data, onContactAction, readOnly = false }
   const [message, setMessage] = useState("");
 
   const activeContacts = useMemo(() => contacts.filter((item) => item.status === "active"), [contacts]);
+  const officialEmails = useMemo(
+    () => emails.filter((item) => item.verified && item.matchEnabled),
+    [emails]
+  );
   const candidateGroups = useMemo(() => {
     const groups = new Map();
     for (const candidate of candidates) {
@@ -76,11 +80,11 @@ export default function ContactsView({ data, onContactAction, readOnly = false }
   }, [activeContacts, candidates]);
   const filtered = useMemo(() => activeContacts.filter((item) => {
     if (typeFilter !== "all" && item.type !== typeFilter && item.type !== "both") return false;
-    const haystack = [item.legalName, item.vatNumber, item.domain, ...emails.filter((e) => e.contactId === item.id).map((e) => e.email)].join(" ").toLowerCase();
+    const haystack = [item.legalName, item.vatNumber, item.domain, ...officialEmails.filter((e) => e.contactId === item.id).map((e) => e.email)].join(" ").toLowerCase();
     return haystack.includes(query.toLowerCase());
-  }), [activeContacts, emails, query, typeFilter]);
+  }), [activeContacts, officialEmails, query, typeFilter]);
   const selected = activeContacts.find((item) => item.id === selectedId) || null;
-  const selectedEmails = emails.filter((item) => item.contactId === selected?.id);
+  const selectedEmails = officialEmails.filter((item) => item.contactId === selected?.id);
   const selectedAliases = aliases.filter((item) => item.contactId === selected?.id);
 
   function selectContact(contact) {
@@ -197,7 +201,7 @@ export default function ContactsView({ data, onContactAction, readOnly = false }
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Ragione sociale</th><th className="px-4 py-3">Tipo</th><th className="px-4 py-3">Email associate</th><th className="px-4 py-3">Stato</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((contact) => {
-                  const contactEmails = emails.filter((item) => item.contactId === contact.id);
+                  const contactEmails = officialEmails.filter((item) => item.contactId === contact.id);
                   return <tr key={contact.id} className={`hover:bg-slate-50 ${selectedId === contact.id ? "bg-slate-50" : ""}`}>
                     <td className="px-4 py-3 font-semibold text-slate-900"><button type="button" onClick={() => selectContact(contact)} className="text-left hover:underline">{contact.legalName}</button></td>
                     <td className="px-4 py-3"><Pill tone={contact.type}>{TYPE_LABELS[contact.type]}</Pill></td>
