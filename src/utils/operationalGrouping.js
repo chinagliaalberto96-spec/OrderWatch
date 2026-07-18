@@ -45,7 +45,7 @@ function counterpartyForItem(item) {
   // un'unica azienda fittizia renderebbe la coda fuorviante.
   return {
     key: `unassigned:${item.id}`,
-    label: "Controparte da identificare",
+    label: "Attività senza controparte",
     type: "unassigned"
   };
 }

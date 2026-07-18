@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, BriefcaseBusiness, Building2, CalendarClock, CheckCircle2, ChevronDown, Clock3, EyeOff, Inbox, Lightbulb, Mail, Send, Users, X } from "lucide-react";
+import { ArrowRight, BriefcaseBusiness, Building2, CalendarClock, CheckCircle2, ChevronDown, Clock3, Eye, EyeOff, Inbox, Lightbulb, Mail, Send, Users, X } from "lucide-react";
 import { daysFromToday, formatDate } from "../utils/dateUtils";
 import { getOrderStatus } from "../utils/statusRules";
 import { getWorkflowMode, getWorkflowPolicy } from "../config/workflowModes";
@@ -168,6 +168,11 @@ export default function DashboardView({
     [queue, snoozed]
   );
 
+  const hiddenQueue = useMemo(
+    () => queue.filter((item) => snoozed[item.id] && RENDERED_PRIORITIES.has(item.priority)),
+    [queue, snoozed]
+  );
+
   const counts = useMemo(() => {
     const urgent = visibleQueue.filter((i) => i.priority === "urgent" || i.status === "due_soon").length;
     const week = visibleQueue.filter((i) => i.status === "this_week" || i.priority === "medium").length;
@@ -176,11 +181,12 @@ export default function DashboardView({
   }, [visibleQueue]);
 
   const filteredQueue = useMemo(() => {
+    if (filter === "hidden") return hiddenQueue;
     if (filter === "urgent") return visibleQueue.filter((i) => i.priority === "urgent" || i.status === "due_soon");
     if (filter === "week") return visibleQueue.filter((i) => i.status === "this_week" || i.priority === "medium");
     if (filter === "review") return visibleQueue.filter((i) => i.status === "needs_review" || i.status === "needs_link");
     return visibleQueue;
-  }, [visibleQueue, filter]);
+  }, [visibleQueue, hiddenQueue, filter]);
 
   const counterpartyGroups = useMemo(
     () => groupOperationalItemsByCounterparty(filteredQueue),
@@ -221,6 +227,15 @@ export default function DashboardView({
     setSnoozed(next);
     window.localStorage.setItem(SNOOZE_KEY, JSON.stringify(next));
     if (selectedItem?.id === item.id) setSelectedItem(null);
+  }
+
+  function restore(item) {
+    const next = { ...snoozed };
+    delete next[item.id];
+    setSnoozed(next);
+    window.localStorage.setItem(SNOOZE_KEY, JSON.stringify(next));
+    if (selectedItem?.id === item.id) setSelectedItem(null);
+    if (filter === "hidden" && hiddenQueue.length <= 1) setFilter("all");
   }
 
   function openItem(item) {
@@ -316,13 +331,21 @@ export default function DashboardView({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-[19px] font-semibold" style={{ color: "var(--color-text)" }}>
-              {counts.total
+              {filter === "hidden"
+                ? `${hiddenQueue.length} ${hiddenQueue.length === 1 ? "attività nascosta" : "attività nascoste"} fino a domani`
+                : counts.total
                 ? `${allCounterpartyGroups.length} ${allCounterpartyGroups.length === 1 ? "controparte" : "controparti"} · ${counts.total} attività da controllare oggi`
                 : "Tutto sotto controllo"}
             </h1>
             <p className="mt-0.5 text-sm" style={{ color: "var(--color-text-muted)" }}>
-              <span className="capitalize">{dateLabel}</span>
-              <span> · Vista {workflowMode.label}: {essentialMode ? "solo eccezioni reali" : assistedMode ? "suggerimenti separati" : "collegamenti inclusi"}</span>
+              {filter === "hidden" ? (
+                <span>Queste attività non sono eliminate. Puoi ripristinarle ora; altrimenti ricompariranno automaticamente domani.</span>
+              ) : (
+                <>
+                  <span className="capitalize">{dateLabel}</span>
+                  <span> · Vista {workflowMode.label}: {essentialMode ? "solo eccezioni reali" : assistedMode ? "suggerimenti separati" : "collegamenti inclusi"}</span>
+                </>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -330,6 +353,7 @@ export default function DashboardView({
             <FilterChip label="Critici" value={counts.urgent} active={filter === "urgent"} tone="danger" onClick={() => setFilter(filter === "urgent" ? "all" : "urgent")} />
             {workflowPolicy.showWeekFilter && <FilterChip label="Questa settimana" value={counts.week} active={filter === "week"} tone="warning" onClick={() => setFilter(filter === "week" ? "all" : "week")} />}
             <FilterChip label="Da verificare" value={counts.review} active={filter === "review"} tone="accent" onClick={() => setFilter(filter === "review" ? "all" : "review")} />
+            {hiddenQueue.length > 0 && <FilterChip label="Nascoste oggi" value={hiddenQueue.length} active={filter === "hidden"} tone="muted" onClick={() => setFilter(filter === "hidden" ? "all" : "hidden")} />}
           </div>
         </div>
       </section>
@@ -370,7 +394,8 @@ export default function DashboardView({
                       key={counterparty.id}
                       group={counterparty}
                       onOpenItem={openItem}
-                      onSnoozeItem={snooze}
+                      onSnoozeItem={filter === "hidden" ? restore : snooze}
+                      hiddenMode={filter === "hidden"}
                       onPrepareSupplierOrder={onPrepareSupplierOrder}
                     />
                   ))}
@@ -477,7 +502,8 @@ export default function DashboardView({
           onSaveConfirmation={saveConfirmation}
           onSendConfirmation={sendConfirmation}
           onOpenFull={() => openFullView(selectedItem)}
-          onSnooze={() => snooze(selectedItem)}
+          onSnooze={() => (filter === "hidden" ? restore(selectedItem) : snooze(selectedItem))}
+          hiddenMode={filter === "hidden"}
           projects={data.projects || []}
           orders={data.orders || []}
           linkDraft={linkDraft}
@@ -491,7 +517,7 @@ export default function DashboardView({
   );
 }
 
-function CounterpartyGroup({ group, onOpenItem, onSnoozeItem, onPrepareSupplierOrder }) {
+function CounterpartyGroup({ group, onOpenItem, onSnoozeItem, onPrepareSupplierOrder, hiddenMode = false }) {
   const [expanded, setExpanded] = useState(false);
   const tone = priorityTone(group.priority);
   const color = toneColor(tone);
@@ -525,6 +551,7 @@ function CounterpartyGroup({ group, onOpenItem, onSnoozeItem, onPrepareSupplierO
             {group.items.length} attività
             {group.urgentCount > 0 ? ` · ${group.urgentCount} urgenti` : ""}
             {group.reviewCount > 0 ? ` · ${group.reviewCount} da verificare` : ""}
+            {group.type === "unassigned" ? " · Apri per identificare o collegare" : ""}
           </span>
         </span>
         <ChevronDown
@@ -541,6 +568,7 @@ function CounterpartyGroup({ group, onOpenItem, onSnoozeItem, onPrepareSupplierO
               item={item}
               onOpen={() => onOpenItem(item)}
               onSnooze={() => onSnoozeItem(item)}
+              hiddenMode={hiddenMode}
               onPrepareSupplierOrder={item.kind === "material_line" && item.canPrepareSupplierOrder && onPrepareSupplierOrder
                 ? () => onPrepareSupplierOrder(item)
                 : null}
@@ -552,7 +580,7 @@ function CounterpartyGroup({ group, onOpenItem, onSnoozeItem, onPrepareSupplierO
   );
 }
 
-function CounterpartyTaskRow({ item, onOpen, onSnooze, onPrepareSupplierOrder }) {
+function CounterpartyTaskRow({ item, onOpen, onSnooze, onPrepareSupplierOrder, hiddenMode = false }) {
   const color = toneColor(priorityTone(item.priority));
   const reference = item.orderCode || item.projectCode;
 
@@ -581,8 +609,8 @@ function CounterpartyTaskRow({ item, onOpen, onSnooze, onPrepareSupplierOrder })
             Prepara ordine
           </button>
         )}
-        <button type="button" onClick={onSnooze} className="rounded-md p-1.5 hover:bg-[color:var(--color-muted)]" aria-label="Ignora oggi" title="Ignora oggi">
-          <EyeOff className="h-3.5 w-3.5" style={{ color: "var(--color-text-muted)" }} />
+        <button type="button" onClick={onSnooze} className="rounded-md p-1.5 hover:bg-[color:var(--color-muted)]" aria-label={hiddenMode ? "Ripristina nella coda" : "Nascondi fino a domani"} title={hiddenMode ? "Ripristina nella coda" : "Nascondi fino a domani"}>
+          {hiddenMode ? <Eye className="h-3.5 w-3.5" style={{ color: "var(--color-accent)" }} /> : <EyeOff className="h-3.5 w-3.5" style={{ color: "var(--color-text-muted)" }} />}
         </button>
         <button type="button" onClick={onOpen} className="rounded-md p-1.5 hover:bg-[color:var(--color-muted)]" aria-label="Apri attività">
           <ArrowRight className="h-3.5 w-3.5" style={{ color }} />
@@ -611,7 +639,8 @@ function ActionDrawer({
   mailboxes,
   onPrepareConfirmation,
   onSaveConfirmation,
-  onSendConfirmation
+  onSendConfirmation,
+  hiddenMode = false
 }) {
   const tone = priorityTone(item.priority);
   const color = toneColor(tone);
@@ -621,7 +650,7 @@ function ActionDrawer({
   const canVerify = !isImportProblem && (item.status === "needs_review" || (Number.isFinite(confidence) && confidence < 0.85));
   const isMaterialGroup = item.kind === "supplier_material_group";
   const needsLink = item.status === "needs_link";
-  const canLink = ["material_line", "quote", "delivery_note", "invoice", "buyer_action"].includes(item.kind);
+  const canLink = ["material_line", "quote", "delivery_note", "invoice", "processed_email", "buyer_action"].includes(item.kind);
   const groupNeedsLink = isMaterialGroup && (item.lineItems || []).some((line) => line.status === "needs_link");
   const canSelectLinkTarget = canLink || groupNeedsLink;
   const canConfirmCustomer = item.kind === "material_line" && item.sourceType === "customer_request";
@@ -670,7 +699,7 @@ function ActionDrawer({
             <InfoBlock label={isMaterialGroup ? "Prima consegna" : "Data"} value={item.dueDate ? formatDate(item.dueDate) : "Non indicata"} />
             <InfoBlock
               label={isContractBilling ? "Responsabile" : "Fornitore/cliente"}
-              value={isContractBilling ? (item.responsibleName || "Non assegnato") : (item.supplierName || item.customerName || "Da verificare")}
+              value={isContractBilling ? (item.responsibleName || "Non assegnato") : (item.supplierName || item.customerName || "Non identificata")}
             />
             <InfoBlock
               label={isContractBilling ? "SAL / importo" : "Riferimento"}
@@ -921,8 +950,8 @@ function ActionDrawer({
             className="flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition hover:bg-[color:var(--color-muted)]"
             style={{ color: "var(--color-text-muted)" }}
           >
-            <EyeOff className="h-4 w-4" />
-            Ignora oggi
+            {hiddenMode ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            {hiddenMode ? "Ripristina nella coda" : "Nascondi fino a domani"}
           </button>
         </div>
       </section>
