@@ -26,6 +26,7 @@ import { AUTH_MODE, getAccessToken, getAuthClient } from "./lib/authClient";
 import PasswordResetView from "./views/PasswordResetView";
 import { getWorkflowPolicy } from "./config/workflowModes";
 import { canAccessView, canWriteOperationalData } from "./utils/permissions";
+import { createSafeLanguagePolicy } from "./utils/safeLanguage";
 
 const viewLabels = (terminology) => ({
   dashboard: "Oggi",
@@ -299,6 +300,13 @@ export default function App() {
 
   const filteredData = useMemo(() => {
     if (!data) return data;
+    const languagePolicy = createSafeLanguagePolicy(data.dataCoverage || []);
+    const sanitizeItem = (item) => ({
+      ...item,
+      title: languagePolicy.sanitize(item.title),
+      detail: languagePolicy.sanitize(item.detail),
+      actionLabel: languagePolicy.sanitize(item.actionLabel)
+    });
     return {
       ...data,
       orders: filterRows(data.orders, searchQuery),
@@ -309,7 +317,13 @@ export default function App() {
       documents: filterRows(data.documents, searchQuery),
       invoices: filterRows(data.invoices || [], searchQuery),
       processedEmails: filterRows(data.processedEmails || [], searchQuery),
-      reminders: filterRows(data.reminders || [], searchQuery)
+      reminders: filterRows(data.reminders || [], searchQuery).map((reminder) => ({
+        ...reminder,
+        body: languagePolicy.sanitize(reminder.body)
+      })),
+      activities: (data.activities || []).map(sanitizeItem),
+      operationalQueue: (data.operationalQueue || []).map(sanitizeItem),
+      operationalSuggestions: (data.operationalSuggestions || []).map(sanitizeItem)
     };
   }, [data, searchQuery]);
 

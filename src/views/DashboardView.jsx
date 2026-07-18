@@ -6,6 +6,7 @@ import { getWorkflowMode, getWorkflowPolicy } from "../config/workflowModes";
 import { groupOperationalItemsByCounterparty } from "../utils/operationalGrouping";
 import OperationalRow from "../components/OperationalRow";
 import OperationalEvidence from "../components/OperationalEvidence";
+import { createSafeLanguagePolicy } from "../utils/safeLanguage";
 
 // Home "Oggi": la coda operativa E' la pagina. Il buyer deve capire in 10
 // secondi cosa fare adesso. Niente KPI/grafici come protagonisti: solo una
@@ -129,6 +130,10 @@ export default function DashboardView({
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
   const rawQueue = data.operationalQueue || [];
+  const languagePolicy = useMemo(
+    () => createSafeLanguagePolicy(data.dataCoverage || []),
+    [data.dataCoverage]
+  );
   const traceabilityMode = (data.settings || []).find((setting) => setting.settingKey === "workflow.traceability_mode")?.value || "required_link";
   const workflowMode = getWorkflowMode(traceabilityMode);
   const workflowPolicy = getWorkflowPolicy(traceabilityMode);
@@ -140,7 +145,14 @@ export default function DashboardView({
   // ricostruisci gli item essenziali dagli ordini che richiedono attenzione,
   // cosi' la home non e' mai vuota quando invece c'e' lavoro da fare.
   const queue = useMemo(() => {
-    if (rawQueue.length) return rawQueue;
+    if (rawQueue.length) {
+      return rawQueue.map((item) => ({
+        ...item,
+        title: languagePolicy.sanitize(item.title),
+        detail: languagePolicy.sanitize(item.detail),
+        actionLabel: languagePolicy.sanitize(item.actionLabel)
+      }));
+    }
     const orders = (data.orders || [])
       .map((order) => ({ ...order, computedStatus: getOrderStatus(order, config.alertRules) }))
       .filter((order) => ["OVERDUE", "CRITICAL", "TO_VERIFY"].includes(order.computedStatus));
@@ -157,7 +169,7 @@ export default function DashboardView({
       supplierName: order.supplierName,
       dueDate: order.dueDate
     }));
-  }, [rawQueue, data.orders, config.alertRules]);
+  }, [rawQueue, data.orders, config.alertRules, languagePolicy]);
 
   // Mostra solo le priorità operative "di oggi" (urgent/high/medium). Gli
   // eventuali item low = programmati tra oltre 7 giorni non appartengono alla
@@ -512,7 +524,7 @@ export default function DashboardView({
               </button>
             ))
           ) : (
-            <EmptyMini text="Nessuna consegna promessa nei prossimi 7 giorni." />
+            <EmptyMini text="Nessuna consegna registrata in OrderWatch nei prossimi 7 giorni." />
           )}
         </SecondaryPanel>
 

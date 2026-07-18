@@ -2,6 +2,7 @@ import { AlertTriangle, Bell, CheckCircle2, Clock3, Mail, Send, XCircle } from "
 import { useMemo, useState } from "react";
 import { formatDate } from "../utils/dateUtils";
 import { getOrderStatus } from "../utils/statusRules";
+import { createSafeLanguagePolicy } from "../utils/safeLanguage";
 
 const statusMeta = {
   draft: { label: "Bozza", tone: "warning", icon: Clock3 },
@@ -34,7 +35,7 @@ function NotificationStatus({ status }) {
   );
 }
 
-function buildNotificationItems({ orders, reminders, processedEmails, config }) {
+function buildNotificationItems({ orders, reminders, processedEmails, config, languagePolicy }) {
   const orderItems = (orders || [])
     .map((order) => ({ ...order, computedStatus: getOrderStatus(order, config.alertRules) }))
     .filter((order) => ["OVERDUE", "CRITICAL", "WARNING", "TO_VERIFY"].includes(order.computedStatus))
@@ -53,7 +54,7 @@ function buildNotificationItems({ orders, reminders, processedEmails, config }) 
     source: "Sollecito",
     status: reminder.status || "draft",
     title: `${reminder.orderCode || "Ordine"} · ${reminder.supplierName || "Fornitore"}`,
-    detail: reminder.body || `Promemoria ${reminder.type || "fornitore"}`,
+    detail: languagePolicy.sanitize(reminder.body || `Promemoria ${reminder.type || "fornitore"}`),
     recipient: reminder.sentTo || "Buyer",
     date: reminder.sentAt
   }));
@@ -94,12 +95,17 @@ export default function NotificationsView({ config, data }) {
     () => Object.fromEntries((data.settings || []).map((setting) => [setting.settingKey, setting])),
     [data.settings]
   );
+  const languagePolicy = useMemo(
+    () => createSafeLanguagePolicy(data.dataCoverage || []),
+    [data.dataCoverage]
+  );
   const items = useMemo(() => buildNotificationItems({
     orders: data.orders,
     reminders: data.reminders,
     processedEmails: data.processedEmails,
-    config
-  }), [config, data.orders, data.processedEmails, data.reminders]);
+    config,
+    languagePolicy
+  }), [config, data.orders, data.processedEmails, data.reminders, languagePolicy]);
 
   const visibleItems = activeFilter === "all" ? items : items.filter((item) => item.status === activeFilter);
   const draftCount = items.filter((item) => item.status === "draft").length;
@@ -176,7 +182,7 @@ export default function NotificationsView({ config, data }) {
           <div>
             <div className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Ultimo report</div>
             <div className="font-semibold">
-              {latestReport ? `${latestReport.status || "-"} · ${latestReport.criticalOrdersCount || 0} critici` : "Non ancora inviato"}
+              {latestReport ? `${latestReport.status || "-"} · ${latestReport.criticalOrdersCount || 0} critici` : "Nessun report registrato"}
             </div>
             <div className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>{reportChannel}</div>
           </div>

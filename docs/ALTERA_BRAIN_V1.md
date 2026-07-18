@@ -64,8 +64,21 @@ evaluated separately.
 
 The dashboard loads coverage through `supabaseServerAdapter.getDataCoverage()`.
 Settings shows the real status, observed volume, reliability, and limitations for
-each source. Future alerts and reports must consult the assertion matrix before
-using language such as "never sent", "no reply", or "does not exist".
+each source. The central safe-language policy is applied to the daily report,
+notifications, dashboard queue, suggestions, reminders, and historical activity
+shown in project and supplier views.
+
+The policy distinguishes database facts from source observations:
+
+- an empty database view is described as "not registered in OrderWatch";
+- a missing email event is described as "not observed in the connected sources";
+- partial inbound or outbound coverage is disclosed next to the conclusion;
+- historical text is normalized before presentation, so legacy phrases such as
+  "no reply", "never sent", and "does not exist" cannot bypass the policy.
+
+The daily report also includes a source-coverage section whenever one or more
+sources are partial or unavailable. Its company name is resolved from the active
+tenant rather than being hardcoded to Graphic Center.
 
 ## Operational evidence
 
@@ -106,8 +119,7 @@ service role. `anon` and `authenticated` have no direct access.
 
 ## Next phase
 
-1. Add a central safe-language policy used by the daily report and notifications.
-2. Add health alerts for stale mailboxes, extraction failures, and deteriorating
+1. Add health alerts for stale mailboxes, extraction failures, and deteriorating
    linkage coverage.
-3. Add learning only from explicit, traceable corrections; never learn from a
+2. Add learning only from explicit, traceable corrections; never learn from a
    hidden or unverified automatic decision.
