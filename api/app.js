@@ -12,10 +12,12 @@ import receivingHandler from "../server/routes/receiving.js";
 import supplierOrdersHandler from "../server/routes/supplier-orders.js";
 import suppliersHandler from "../server/routes/suppliers.js";
 import alteraHandler from "../server/routes/altera.js";
+import alteraTelegramHandler from "../server/routes/altera-telegram.js";
 import telegramConnectionsHandler from "../server/routes/telegram-connections.js";
 
 const handlers = {
   altera: alteraHandler,
+  "altera-telegram": alteraTelegramHandler,
   contacts: contactsHandler,
   "contract-billing-items": contractBillingItemsHandler,
   "contract-progress-reports": contractProgressReportsHandler,

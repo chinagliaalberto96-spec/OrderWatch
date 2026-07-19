@@ -281,12 +281,12 @@ async function getChat(request, response, user) {
   response.status(200).json({ conversations: conversations || [], conversation, messages: messages || [] });
 }
 
-async function postChat(request, response, user) {
-  const question = cleanText(request.body?.question, MAX_QUESTION_LENGTH);
+export async function askAltera({ question: rawQuestion, conversationId, user }) {
+  const question = cleanText(rawQuestion, MAX_QUESTION_LENGTH);
   if (question.length < 2) throw Object.assign(new Error("Scrivi una domanda per Altera."), { statusCode: 400 });
   await enforceRateLimit(user);
 
-  let conversation = await loadConversation(request.body?.conversationId, user);
+  let conversation = await loadConversation(conversationId, user);
   if (!conversation) conversation = await createConversation(question, user);
   if (!conversation) throw new Error("Impossibile aprire la conversazione.");
 
@@ -316,7 +316,16 @@ async function postChat(request, response, user) {
     body: { updated_at: new Date().toISOString() }
   });
 
-  response.status(200).json({ conversation, message: { ...saved, ...validated } });
+  return { conversation, message: { ...saved, ...validated } };
+}
+
+async function postChat(request, response, user) {
+  const result = await askAltera({
+    question: request.body?.question,
+    conversationId: request.body?.conversationId,
+    user
+  });
+  response.status(200).json(result);
 }
 
 export default async function handler(request, response) {

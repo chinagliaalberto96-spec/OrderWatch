@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/api/settings", "destination": "/api/admin?route=settings" },
     { "source": "/api/altera", "destination": "/api/app?route=altera" },
+    { "source": "/api/altera-telegram", "destination": "/api/app?route=altera-telegram" },
     { "source": "/api/app-users", "destination": "/api/admin?route=app-users" },
     { "source": "/api/report-recipients", "destination": "/api/admin?route=report-recipients" },
     { "source": "/api/contacts", "destination": "/api/app?route=contacts" },
