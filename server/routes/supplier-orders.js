@@ -1,8 +1,8 @@
-import nodemailer from "nodemailer";
-import { decryptSecret } from "../lib/_mailboxCrypto.js";
 import { supabaseRequest, orgFilter, withOrg } from "../lib/_supabaseRest.js";
 import { buildSupplierOrderPdf } from "../lib/_supplierOrderPdf.js";
 import { authorizeApiRequest } from "../lib/_auth.js";
+import { publicMailboxError, sanitizeSecurityError } from "../lib/_securityRedaction.js";
+import { createMailboxSmtpTransport } from "../lib/_smtpTransport.js";
 
 // Workflow ordini verso fornitori — endpoint server-side coerente con
 // /api/customer-confirmations. La service role resta solo qui, mai nel browser.
@@ -81,7 +81,7 @@ function mapDispatch(row) {
     confirmedAt: row.confirmed_at,
     promisedDate: row.promised_date,
     reminderCount: row.reminder_count,
-    lastError: row.last_error
+    lastError: publicMailboxError(row.last_error)
   };
 }
 
@@ -478,11 +478,15 @@ async function approveDraft(body, organizationId) {
   return mapDispatch(updated?.[0]);
 }
 
-async function chooseMailbox(mailboxId, organizationId) {
+export async function chooseMailbox(mailboxId, organizationId, requestDb = supabaseRequest) {
+  if (!organizationId) throw httpError("Tenant non disponibile.", 403);
   const idFilter = mailboxId ? `&id=eq.${encodeURIComponent(mailboxId)}` : "";
-  const rows = await supabaseRequest(`mailboxes?select=*&${orgFilter(organizationId)}&active=eq.true&connection_status=eq.connected&encrypted_password=not.is.null${idFilter}&order=connected_at.desc&limit=1`);
+  const columns = "id,smtp_host,smtp_port,smtp_secure,email_address,encrypted_password,active,connection_status,connected_at";
+  const rows = await requestDb(`mailboxes?select=${columns}&${orgFilter(organizationId)}&active=eq.true&connection_status=eq.connected&encrypted_password=not.is.null${idFilter}&order=connected_at.desc&limit=1`);
   const mailbox = rows?.[0];
-  if (!mailbox) throw httpError("Nessuna casella aziendale con SMTP collegata.", 409);
+  if (!mailbox) {
+    throw httpError("Nessuna casella aziendale con SMTP collegata.", 404);
+  }
   return mailbox;
 }
 
@@ -506,38 +510,23 @@ async function sendOrder(body, organizationId) {
     throw httpError("Oggetto o testo mancante.", 409);
   }
 
-  const mailbox = await chooseMailbox(body.senderMailboxId || dispatch.sender_mailbox_id, organizationId);
   const dryRun = String(process.env.SUPPLIER_ORDER_SMTP_DRY_RUN || "").toLowerCase() === "true";
-
-  const transporter = dryRun
-    ? nodemailer.createTransport({ jsonTransport: true })
-    : nodemailer.createTransport({
-        host: mailbox.smtp_host,
-        port: Number(mailbox.smtp_port || 465),
-        secure: mailbox.smtp_secure !== false,
-        auth: { user: mailbox.email_address, pass: decryptSecret(mailbox.encrypted_password) }
-      });
-
-  // Allegato PDF opzionale (default: si'). Layout generico v1, vedi
-  // _supplierOrderPdf.js — sostituibile col template definitivo del cliente
-  // senza toccare il resto del flusso di invio.
-  const attachments = [];
-  if (body.attachPdf !== false) {
-    try {
-      const companyName = await settingValue("client.company_name", "Azienda", organizationId);
-      const pdfBuffer = await buildSupplierOrderPdf(
-        { orderCode: dispatch.order_code, projectCode: dispatch.project_code, supplierName: dispatch.supplier_name, supplierEmail: dispatch.supplier_email, contactName: dispatch.contact_name, lines: dispatch.line_snapshot },
-        { name: companyName }
-      );
-      attachments.push({ filename: `Ordine_${dispatch.order_code || "fornitore"}.pdf`, content: pdfBuffer, contentType: "application/pdf" });
-    } catch (pdfError) {
-      // Un problema nella generazione del PDF non deve bloccare l'invio
-      // dell'ordine: si procede senza allegato e si traccia l'anomalia.
-      console.warn("[supplier-orders] Generazione PDF fallita:", pdfError.message);
-    }
-  }
-
   try {
+    const mailbox = await chooseMailbox(body.senderMailboxId || dispatch.sender_mailbox_id, organizationId);
+    const transporter = createMailboxSmtpTransport(mailbox, { dryRun });
+    const attachments = [];
+    if (body.attachPdf !== false) {
+      try {
+        const companyName = await settingValue("client.company_name", "Azienda", organizationId);
+        const pdfBuffer = await buildSupplierOrderPdf(
+          { orderCode: dispatch.order_code, projectCode: dispatch.project_code, supplierName: dispatch.supplier_name, supplierEmail: dispatch.supplier_email, contactName: dispatch.contact_name, lines: dispatch.line_snapshot },
+          { name: companyName }
+        );
+        attachments.push({ filename: `Ordine_${dispatch.order_code || "fornitore"}.pdf`, content: pdfBuffer, contentType: "application/pdf" });
+      } catch (pdfError) {
+        console.warn("[supplier-orders] Generazione PDF fallita:", sanitizeSecurityError(pdfError));
+      }
+    }
     const result = await transporter.sendMail({
       from: mailbox.email_address,
       to: dispatch.supplier_email,
@@ -582,11 +571,17 @@ async function sendOrder(body, organizationId) {
     });
     return mapDispatch(updated?.[0]);
   } catch (error) {
-    await supabaseRequest(`supplier_order_dispatches?id=eq.${encodeURIComponent(dispatch.id)}&${orgFilter(organizationId)}`, {
-      method: "PATCH",
-      body: { status: "failed", last_error: error.message, updated_at: new Date().toISOString() }
-    });
-    throw error;
+    const safe = sanitizeSecurityError(error);
+    try {
+      await supabaseRequest(`supplier_order_dispatches?id=eq.${encodeURIComponent(dispatch.id)}&${orgFilter(organizationId)}`, {
+        method: "PATCH",
+        body: { status: "failed", last_error: safe, updated_at: new Date().toISOString() }
+      });
+    } catch (persistenceError) {
+      console.warn("[supplier-orders] registrazione errore fallita:", sanitizeSecurityError(persistenceError));
+    }
+    console.warn("[supplier-orders] invio fallito:", safe);
+    throw httpError("Impossibile inviare l'ordine fornitore.", 502);
   }
 }
 
@@ -652,18 +647,10 @@ async function sendReminder(body, organizationId) {
   if (!validEmail(reminder.supplier_email)) throw httpError("Email fornitore non valida.", 409);
 
   const dispatch = reminder.dispatch_id ? await loadDispatch(reminder.dispatch_id, organizationId) : null;
-  const mailbox = await chooseMailbox(body.senderMailboxId || dispatch?.sender_mailbox_id, organizationId);
   const dryRun = String(process.env.SUPPLIER_ORDER_SMTP_DRY_RUN || "").toLowerCase() === "true";
-  const transporter = dryRun
-    ? nodemailer.createTransport({ jsonTransport: true })
-    : nodemailer.createTransport({
-        host: mailbox.smtp_host,
-        port: Number(mailbox.smtp_port || 465),
-        secure: mailbox.smtp_secure !== false,
-        auth: { user: mailbox.email_address, pass: decryptSecret(mailbox.encrypted_password) }
-      });
-
   try {
+    const mailbox = await chooseMailbox(body.senderMailboxId || dispatch?.sender_mailbox_id, organizationId);
+    const transporter = createMailboxSmtpTransport(mailbox, { dryRun });
     const result = await transporter.sendMail({
       from: mailbox.email_address,
       to: reminder.supplier_email,
@@ -698,11 +685,17 @@ async function sendReminder(body, organizationId) {
     });
     return mapReminder(updated?.[0]);
   } catch (error) {
-    await supabaseRequest(`reminders?id=eq.${encodeURIComponent(reminder.id)}&${orgFilter(organizationId)}`, {
-      method: "PATCH",
-      body: { status: "failed", error_detail: error.message, updated_at: new Date().toISOString() }
-    });
-    throw error;
+    const safe = sanitizeSecurityError(error);
+    try {
+      await supabaseRequest(`reminders?id=eq.${encodeURIComponent(reminder.id)}&${orgFilter(organizationId)}`, {
+        method: "PATCH",
+        body: { status: "failed", error_detail: safe, updated_at: new Date().toISOString() }
+      });
+    } catch (persistenceError) {
+      console.warn("[supplier-orders] registrazione errore sollecito fallita:", sanitizeSecurityError(persistenceError));
+    }
+    console.warn("[supplier-orders] invio sollecito fallito:", safe);
+    throw httpError("Impossibile inviare il sollecito fornitore.", 502);
   }
 }
 
@@ -720,7 +713,7 @@ function mapReminder(row) {
     attempt: row.attempt,
     sentAt: row.sent_at,
     messageId: row.smtp_message_id,
-    lastError: row.error_detail
+    lastError: publicMailboxError(row.error_detail)
   };
 }
 
@@ -778,9 +771,10 @@ export default async function handler(request, response) {
     response.setHeader("Cache-Control", "no-store");
     response.status(200).json({ dispatch });
   } catch (error) {
-    response.status(error.statusCode || 500).json({
+    const statusCode = error.statusCode || 500;
+    response.status(statusCode).json({
       error: "Unable to manage supplier order",
-      detail: error.message
+      detail: statusCode < 500 ? sanitizeSecurityError(error) : "Operazione temporaneamente non disponibile."
     });
   }
 }

@@ -1,4 +1,4 @@
-import { requireApiUser } from "../server/lib/_auth.js";
+import { authorizeApiRequest } from "../server/lib/_auth.js";
 
 export default async function handler(request, response) {
   if (request.method !== "GET") {
@@ -7,11 +7,7 @@ export default async function handler(request, response) {
     return;
   }
 
-  try {
-    const user = await requireApiUser(request, response);
-    if (!user) return;
-    response.status(200).json({ user });
-  } catch (error) {
-    response.status(500).json({ error: "Unable to validate session", detail: error.message });
-  }
+  const user = await authorizeApiRequest(request, response);
+  if (!user) return;
+  response.status(200).json({ user });
 }

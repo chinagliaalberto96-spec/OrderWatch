@@ -1,7 +1,7 @@
-import nodemailer from "nodemailer";
-import { decryptSecret } from "../lib/_mailboxCrypto.js";
 import { supabaseRequest, orgFilter, withOrg } from "../lib/_supabaseRest.js";
 import { authorizeApiRequest } from "../lib/_auth.js";
+import { publicMailboxError, sanitizeSecurityError } from "../lib/_securityRedaction.js";
+import { createMailboxSmtpTransport } from "../lib/_smtpTransport.js";
 
 // CANCELLO 2: ogni query e' filtrata sull'organizzazione dell'utente
 // autenticato; ogni riga creata viene marcata con quella organizzazione.
@@ -33,7 +33,7 @@ function mapConfirmation(row) {
     senderMailboxId: row.sender_mailbox_id,
     sentAt: row.sent_at,
     messageId: row.smtp_message_id,
-    lastError: row.last_error
+    lastError: publicMailboxError(row.last_error)
   };
 }
 
@@ -176,15 +176,23 @@ async function updateDraft(body, organizationId) {
   return mapConfirmation(updated?.[0]);
 }
 
-async function chooseMailbox(mailboxId, organizationId) {
+export async function chooseMailbox(mailboxId, organizationId, requestDb = supabaseRequest) {
+  if (!organizationId) {
+    const error = new Error("Tenant non disponibile.");
+    error.statusCode = 403;
+    throw error;
+  }
   const idFilter = mailboxId ? `&id=eq.${encodeURIComponent(mailboxId)}` : "";
-  const rows = await supabaseRequest(`mailboxes?select=*&${orgFilter(organizationId)}&active=eq.true&connection_status=eq.connected&encrypted_password=not.is.null${idFilter}&order=connected_at.desc&limit=1`);
+  // Select only fields required for SMTP transport, sender identity and eligibility.
+  const columns = "id,smtp_host,smtp_port,smtp_secure,email_address,encrypted_password,active,connection_status,connected_at";
+  const rows = await requestDb(`mailboxes?select=${columns}&${orgFilter(organizationId)}&active=eq.true&connection_status=eq.connected&encrypted_password=not.is.null${idFilter}&order=connected_at.desc&limit=1`);
   const mailbox = rows?.[0];
   if (!mailbox) {
     const error = new Error("Nessuna casella aziendale con SMTP collegata.");
-    error.statusCode = 409;
+    error.statusCode = 404;
     throw error;
   }
+  // Do not expose encrypted_password outside this function; callers must not serialize mailbox.
   return mailbox;
 }
 
@@ -200,16 +208,9 @@ async function sendConfirmation(body, organizationId) {
   if (confirmation.status === "sent") return mapConfirmation(confirmation);
   if (!validEmail(confirmation.customer_email)) throw new Error("Email cliente non valida.");
 
-  const mailbox = await chooseMailbox(body.senderMailboxId, organizationId);
-  const password = decryptSecret(mailbox.encrypted_password);
-  const transporter = nodemailer.createTransport({
-    host: mailbox.smtp_host,
-    port: Number(mailbox.smtp_port || 465),
-    secure: mailbox.smtp_secure !== false,
-    auth: { user: mailbox.email_address, pass: password }
-  });
-
   try {
+    const mailbox = await chooseMailbox(body.senderMailboxId, organizationId);
+    const transporter = createMailboxSmtpTransport(mailbox);
     const result = await transporter.sendMail({
       from: mailbox.email_address,
       to: confirmation.customer_email,
@@ -245,11 +246,20 @@ async function sendConfirmation(body, organizationId) {
     });
     return mapConfirmation(updated?.[0]);
   } catch (error) {
-    await supabaseRequest(`customer_confirmations?id=eq.${encodeURIComponent(confirmation.id)}&${orgFilter(organizationId)}`, {
-      method: "PATCH",
-      body: { status: "failed", last_error: error.message, updated_at: new Date().toISOString() }
-    });
-    throw error;
+    // Sanitize any error before logging or storing
+    const safe = sanitizeSecurityError(error);
+    try {
+      await supabaseRequest(`customer_confirmations?id=eq.${encodeURIComponent(confirmation.id)}&${orgFilter(organizationId)}`, {
+        method: "PATCH",
+        body: { status: "failed", last_error: safe, updated_at: new Date().toISOString() }
+      });
+    } catch (persistenceError) {
+      console.warn("[customer-confirmations] registrazione errore fallita:", sanitizeSecurityError(persistenceError));
+    }
+    console.warn("[customer-confirmations] invio fallito:", safe);
+    const publicError = new Error("Impossibile inviare la conferma cliente.");
+    publicError.statusCode = 502;
+    throw publicError;
   }
 }
 
@@ -277,9 +287,10 @@ export default async function handler(request, response) {
     response.setHeader("Cache-Control", "no-store");
     response.status(200).json({ confirmation });
   } catch (error) {
-    response.status(error.statusCode || 500).json({
+    const statusCode = error.statusCode || 500;
+    response.status(statusCode).json({
       error: "Unable to manage customer confirmation",
-      detail: error.message
+      detail: statusCode < 500 ? sanitizeSecurityError(error) : "Operazione temporaneamente non disponibile."
     });
   }
 }

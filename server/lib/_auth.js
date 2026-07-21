@@ -12,7 +12,21 @@ const LEGACY_ORGANIZATION_SLUG = process.env.LEGACY_ORGANIZATION_SLUG || "graphi
 let legacyOrgCache = null;
 
 export function usesSecureAuth() {
-  return process.env.AUTH_MODE === "supabase";
+  return String(process.env.AUTH_MODE || "").trim() === "supabase";
+}
+
+// Detect production-like environments. Treat as production when any indicator is set.
+export function isProductionEnv(env = process.env) {
+  const node = String(env.NODE_ENV || "").toLowerCase();
+  const vercel = String(env.VERCEL_ENV || "").toLowerCase();
+  const railwayDeployment = String(env.RAILWAY_DEPLOYMENT_ID || "").trim();
+  const railwayEnvironment = String(env.RAILWAY_ENVIRONMENT_ID || "").trim();
+  return node === "production" || vercel === "production" || Boolean(railwayDeployment || railwayEnvironment);
+}
+
+// Legacy auth is allowed only when NOT in production and ALLOW_LEGACY_AUTH is explicitly true.
+export function allowLegacyAuth() {
+  return !isProductionEnv() && String(process.env.ALLOW_LEGACY_AUTH || "").toLowerCase() === "true";
 }
 
 async function loadOrganizationBySlug(slug) {
@@ -63,12 +77,29 @@ async function resolveMembership(appUserId, organizationId) {
 }
 
 export async function requireApiUser(request, response, { roles, requireSecureAuth = false } = {}) {
+  const authMode = String(process.env.AUTH_MODE || "").trim();
+  const prod = isProductionEnv();
+  if (prod) {
+    if (!authMode) {
+      response.status(500).json({ error: "AUTH_MODE must be configured in production." });
+      return null;
+    }
+    if (authMode !== "supabase") {
+      response.status(500).json({ error: "Unsupported AUTH_MODE in production." });
+      return null;
+    }
+  }
+
   if (requireSecureAuth && !usesSecureAuth()) {
     response.status(401).json({ error: "Autenticazione sicura richiesta." });
     return null;
   }
 
   if (!usesSecureAuth()) {
+    if (!allowLegacyAuth()) {
+      response.status(401).json({ error: "Legacy authentication is disabled in this environment." });
+      return null;
+    }
     const organization = await resolveLegacyOrganization();
     const configuredMembershipId = String(process.env.LEGACY_ACTOR_MEMBERSHIP_ID || "").trim();
     let legacyMembership = null;
@@ -103,6 +134,10 @@ export async function requireApiUser(request, response, { roles, requireSecureAu
   }
 
   const { url, serviceKey } = getSupabaseConfig();
+  if (!url || !serviceKey) {
+    response.status(500).json({ error: "Supabase configuration incomplete." });
+    return null;
+  }
   const authResponse = await fetch(`${url}/auth/v1/user`, {
     headers: {
       apikey: serviceKey,
