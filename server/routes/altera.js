@@ -14,6 +14,8 @@ REGOLE VINCOLANTI:
 - Distingui sempre tra dato osservato, dato incompleto e dato non disponibile.
 - Se la copertura di una fonte e partial/unavailable, non trasformare l'assenza di un evento in certezza.
 - Non dire "mai inviato", "nessuna risposta" o "non esiste" se le fonti non lo provano.
+- Le evidenze con provenance "Storico MBOX" dimostrano che un messaggio outbound e stato osservato, ma hanno copertura partial: usale per completare il contesto senza considerare automaticamente applicata la modifica operativa proposta.
+- Se un'evidenza storica ha suggestedOutcome "needs_review", presentala come ipotesi da verificare e non come fatto certo.
 - Non eseguire modifiche. Puoi solo spiegare, riepilogare e indicare dove intervenire.
 - Rispondi esattamente sull'oggetto richiesto: non sostituire DDT con righe operative generiche, ordini con lavori o fatture con documenti generici.
 - Per i DDT usa stato, numero righe e abbinamenti ricezione. Un DDT in stato new/to_review/partially_matched o con righe non allocate e ancora da verificare.
@@ -99,7 +101,7 @@ function addRefs(rows, prefix, mapper, registry) {
 
 async function buildOperationalContext(organizationId) {
   const filter = orgFilter(organizationId);
-  const [orders, projects, suppliers, lines, deliveryNotes, deliveryNoteLines, receiptAllocations, invoices, quotes, actions, coverage, health] = await Promise.all([
+  const [orders, projects, suppliers, lines, deliveryNotes, deliveryNoteLines, receiptAllocations, invoices, quotes, actions, coverage, health, historicalOutboundEvidence] = await Promise.all([
     supabaseRequest(`orders?${filter}&select=*&order=updated_at.desc&limit=120`),
     supabaseRequest(`projects?${filter}&select=*&order=updated_at.desc&limit=100`),
     supabaseRequest(`suppliers?${filter}&select=*&order=updated_at.desc&limit=100`),
@@ -111,7 +113,8 @@ async function buildOperationalContext(organizationId) {
     supabaseRequest(`quotes?${filter}&select=*&order=updated_at.desc&limit=100`),
     supabaseRequest(`buyer_actions?${filter}&select=*&order=created_at.desc&limit=100`),
     supabaseRequest(`data_source_coverage?${filter}&select=*`),
-    supabaseRequest(`system_health_alerts?${filter}&select=*&limit=30`)
+    supabaseRequest(`system_health_alerts?${filter}&select=*&limit=30`),
+    supabaseRequest(`historical_email_import_proposals?${filter}&operational_writes_applied=eq.false&select=proposal_id,action_family,latest_type,latest_at,source_message_count,superseded_message_count,certainty,linked_order_code,linked_project_code,counterparty_name,counterparty_role,proposed_effect,suggested_outcome,review_status,provenance&order=latest_at.desc&limit=60`)
   ]);
 
   const registry = new Map();
@@ -187,6 +190,16 @@ async function buildOperationalContext(organizationId) {
       orderCode: row.order_code, projectCode: row.project_code, supplier: row.supplier_name,
       actionAt: row.action_at, direction: row.direction
     }), registry),
+    historicalOutboundEvidence: addRefs(historicalOutboundEvidence, "E", (row) => ({
+      type: "historical_outbound_evidence", id: row.proposal_id,
+      provenance: row.provenance?.label || "Storico MBOX", coverage: row.provenance?.coverage || "partial",
+      observedAt: row.latest_at, actionFamily: row.action_family, messageType: row.latest_type,
+      counterparty: row.counterparty_name, counterpartyRole: row.counterparty_role,
+      orderCode: row.linked_order_code, projectCode: row.linked_project_code,
+      certainty: row.certainty, suggestedOutcome: row.suggested_outcome, reviewStatus: row.review_status,
+      sourceMessageCount: row.source_message_count, supersededMessages: row.superseded_message_count,
+      proposedEffect: cleanText(row.proposed_effect)
+    }), registry),
     coverage: addRefs(coverage, "C", (row) => ({
       type: "coverage", id: row.source_key, source: row.label, status: row.status,
       reliability: row.reliability, message: cleanText(row.message), limitation: cleanText(row.limitation)
@@ -207,6 +220,11 @@ function citationTarget(item) {
   if (item.type === "delivery_note") return { view: "receiving", deliveryNoteId: item.id };
   if (item.type === "invoice") return { view: "invoices", invoiceId: item.id };
   if (item.type === "quote") return { view: "quotes", quoteId: item.id };
+  if (item.type === "historical_outbound_evidence") {
+    if (item.orderCode) return { view: "orders", orderCode: item.orderCode };
+    if (item.projectCode) return { view: "projects", projectCode: item.projectCode };
+    return { view: "imports" };
+  }
   if (item.type === "coverage" || item.type === "health") return { view: "settings" };
   if (item.type === "line") {
     if (item.orderCode) return { view: "orders", orderCode: item.orderCode };
@@ -223,6 +241,7 @@ function citationLabel(item) {
   if (item.type === "delivery_note") return `DDT ${item.ddtNumber || "da verificare"}`;
   if (item.type === "invoice") return `Fattura ${item.invoiceNumber || "da verificare"}`;
   if (item.type === "quote") return `Preventivo ${item.quoteNumber || "da verificare"}`;
+  if (item.type === "historical_outbound_evidence") return `Storico MBOX · ${item.counterparty || "controparte da verificare"}`;
   if (item.type === "coverage") return item.source;
   if (item.type === "health") return item.title;
   if (item.type === "line") return item.description || "Riga operativa";
