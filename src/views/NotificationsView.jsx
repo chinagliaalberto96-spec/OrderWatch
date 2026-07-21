@@ -106,8 +106,13 @@ export default function NotificationsView({ config, data, onNavigate }) {
   const latestReport = dailyReports[0];
   const reportEnabled = parseSettingValue(settingsByKey, "daily_report.enabled", false);
   const reportTime = parseSettingValue(settingsByKey, "daily_report.send_time", "09:00");
-  const reportRecipient = parseSettingValue(settingsByKey, "daily_report.recipient_name", "Buyer");
-  const reportEmail = parseSettingValue(settingsByKey, "daily_report.recipient_email", "-");
+  const activeReportRecipients = (data.reportRecipients || []).filter((recipient) => recipient.active && recipient.dailyReport && recipient.channel === "email");
+  const reportRecipient = activeReportRecipients.length
+    ? activeReportRecipients.map((recipient) => recipient.recipientName).join(", ")
+    : parseSettingValue(settingsByKey, "daily_report.recipient_name", "Buyer");
+  const reportEmail = activeReportRecipients.length
+    ? activeReportRecipients.map((recipient) => recipient.email).join(", ")
+    : parseSettingValue(settingsByKey, "daily_report.recipient_email", "-");
   const reportChannel = parseSettingValue(settingsByKey, "daily_report.channel", "email");
   const systemHealthAlerts = data.systemHealthAlerts || [];
 
@@ -198,7 +203,7 @@ export default function NotificationsView({ config, data, onNavigate }) {
             </div>
           </div>
           <div className="min-w-0">
-            <div className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Destinatario</div>
+            <div className="text-[12px]" style={{ color: "var(--color-text-muted)" }}>Destinatari effettivi</div>
             <div className="truncate font-semibold">{reportRecipient}</div>
             <div className="truncate text-[12px]" style={{ color: "var(--color-text-muted)" }}>{reportEmail}</div>
           </div>

@@ -719,6 +719,7 @@ export default function App() {
               onDeleteOrder={handleDeleteOrder}
               materialLines={filteredData.materialLines || []}
               materialLineRevisions={data.materialLineRevisions || []}
+              pendingDeliveryNotesCount={(data.deliveryNotes || []).filter((note) => note.needsReview).length}
               onNavigate={handleNavigate}
               onPrepareSupplierOrder={canWriteOperationalData(sessionUser?.role) && backendModuleFlags.supplier_orders !== false && getWorkflowPolicy(settingsValue(data.settings, "workflow.traceability_mode")).allowSupplierOrderPreparation
                 ? (item) => setSupplierOrderItem(item)
@@ -732,6 +733,8 @@ export default function App() {
               materialLines={filteredData.materialLines || []}
               orders={filteredData.orders || []}
               activities={data.activities || []}
+              focusProjectCode={drilldown.projectCode}
+              onNavigate={handleNavigate}
               onUpdateProject={canWriteOperationalData(sessionUser?.role) ? handleUpdateProject : null}
               onCreateProcurementRequirement={canWriteOperationalData(sessionUser?.role) ? handleProcurementRequirement : null}
             />
@@ -765,6 +768,7 @@ export default function App() {
               focusSupplierName={drilldown.supplierName}
               focusTab={drilldown.supplierTab}
               focusMaterialLineIds={drilldown.materialLineIds || []}
+              onNavigate={handleNavigate}
               onSupplierAction={canWriteOperationalData(sessionUser?.role) ? handleSupplierAction : null}
               onVerifyMaterialLines={canWriteOperationalData(sessionUser?.role) ? handleVerifyMaterialLines : null}
               onLinkMaterialLines={canWriteOperationalData(sessionUser?.role) ? handleLinkMaterialLines : null}

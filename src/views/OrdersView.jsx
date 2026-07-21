@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, PackageOpen, ShoppingCart, X } from "lucide-react";
+import { PackageOpen, ShoppingCart, X } from "lucide-react";
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
 import OperationalRow from "../components/OperationalRow";
 import OrderDetailPanel from "../components/OrderDetailPanel";
+import SeverityHighlight from "../components/SeverityHighlight";
+import SmartEmptyState from "../components/SmartEmptyState";
 import StatusBadge from "../components/StatusBadge";
 import { formatDate } from "../utils/dateUtils";
 import { formatNumber, humanizeColumn } from "../utils/formatters";
@@ -14,7 +16,7 @@ import { canPrepareSupplierOrderFromLine, isProcurementRequirement } from "../ut
 // richieste" quando si arriva qui dal KPI della dashboard.
 const ACTION_STATUSES = ["OVERDUE", "CRITICAL", "TO_VERIFY"];
 
-export default function OrdersView({ config, orders, materialLines = [], focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onNavigate, onPrepareSupplierOrder }) {
+export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onNavigate, onPrepareSupplierOrder }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   // Dopo un refresh dei dati (es. update dal pannello) l'ordine selezionato
@@ -39,6 +41,21 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
     () => (presetFilter === "actions" ? allRows.filter((row) => ACTION_STATUSES.includes(row.status)) : allRows),
     [allRows, presetFilter]
   );
+
+  // Peso visivo immediato sullo stato generale, stesso principio degli
+  // highlight di Altera: mostra solo le categorie non vuote.
+  const severitySummary = useMemo(() => {
+    const overdue = allRows.filter((row) => row.status === "OVERDUE").length;
+    const critical = allRows.filter((row) => row.status === "CRITICAL").length;
+    const toVerify = allRows.filter((row) => row.status === "TO_VERIFY").length;
+    const onTrack = allRows.length - overdue - critical - toVerify;
+    const items = [];
+    if (overdue) items.push({ label: "In ritardo", value: overdue, severity: "critical" });
+    if (critical) items.push({ label: "In scadenza", value: critical, severity: "warning" });
+    if (toVerify) items.push({ label: "Da verificare", value: toVerify, severity: "warning" });
+    if (allRows.length && onTrack > 0) items.push({ label: "Sotto controllo", value: onTrack, severity: "success" });
+    return items;
+  }, [allRows]);
 
   // Drill-down dalla dashboard/notifiche: apre direttamente l'ordine indicato.
   useEffect(() => {
@@ -100,12 +117,25 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
             </span>
           </div>
         )}
+        {!presetFilter && severitySummary.length > 0 && (
+          <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {severitySummary.map((item) => (
+              <SeverityHighlight key={item.label} label={item.label} value={item.value} severity={item.severity} />
+            ))}
+          </div>
+        )}
+
         {rows.length ? (
           <Card title={`${config.terminology.ordersPlural} registrati (${rows.length})`}>
             <DataTable columns={columns} rows={rows} renderCell={renderCell} onRowClick={setSelectedOrder} />
           </Card>
         ) : (
-          <OrdersEmptyState filtered={presetFilter === "actions"} onNavigate={onNavigate} />
+          <OrdersEmptyState
+            filtered={presetFilter === "actions"}
+            onNavigate={onNavigate}
+            hasProcurementNeeds={procurementNeeds.length > 0}
+            pendingDeliveryNotesCount={pendingDeliveryNotesCount}
+          />
         )}
 
         {!presetFilter && procurementNeeds.length > 0 && (
@@ -151,26 +181,42 @@ export default function OrdersView({ config, orders, materialLines = [], focusOr
         onClose={() => setSelectedOrder(null)}
         onUpdateOrder={onUpdateOrder}
         onDeleteOrder={onDeleteOrder}
+        onNavigate={onNavigate}
       />
     </div>
   );
 }
 
-function OrdersEmptyState({ filtered, onNavigate }) {
+function OrdersEmptyState({ filtered, onNavigate, hasProcurementNeeds, pendingDeliveryNotesCount }) {
+  if (filtered) {
+    return (
+      <SmartEmptyState
+        icon={PackageOpen}
+        title="Nessun ordine richiede un'azione"
+        description="Gli ordini aperti non presentano scadenze o verifiche urgenti."
+      />
+    );
+  }
+
+  const actions = [];
+  if (onNavigate) {
+    actions.push({ label: "Apri le azioni di oggi", onClick: () => onNavigate("dashboard") });
+    if (pendingDeliveryNotesCount > 0) {
+      actions.push({
+        label: `Collega ${pendingDeliveryNotesCount} DDT in attesa in Ricevimenti`,
+        onClick: () => onNavigate("receiving")
+      });
+    }
+  }
+
   return (
-    <section className="border-y px-5 py-14 text-center" style={{ borderColor: "var(--color-border)" }}>
-      <PackageOpen className="mx-auto h-8 w-8" style={{ color: "var(--color-text-muted)" }} />
-      <h2 className="mt-4 font-semibold">{filtered ? "Nessun ordine richiede un'azione" : "Nessun ordine fornitore registrato"}</h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm" style={{ color: "var(--color-text-muted)" }}>
-        {filtered
-          ? "Gli ordini aperti non presentano scadenze o verifiche urgenti."
-          : "Gli ordini compariranno quando OrderWatch riconosce una conferma fornitore o quando il buyer prepara un ordine da un fabbisogno di acquisto approvato."}
-      </p>
-      {!filtered && onNavigate && (
-        <button type="button" onClick={() => onNavigate("dashboard")} className="mt-5 inline-flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--color-primary)" }}>
-          Apri le azioni di oggi <ArrowRight className="h-4 w-4" />
-        </button>
-      )}
-    </section>
+    <SmartEmptyState
+      icon={PackageOpen}
+      title="Nessun ordine fornitore registrato"
+      description={hasProcurementNeeds
+        ? "Nessuna conferma fornitore ricevuta finora, ma ci sono fabbisogni di acquisto in attesa qui sotto."
+        : "Gli ordini compariranno quando OrderWatch riconosce una conferma fornitore o quando il buyer prepara un ordine da un fabbisogno di acquisto approvato."}
+      actions={actions}
+    />
   );
 }

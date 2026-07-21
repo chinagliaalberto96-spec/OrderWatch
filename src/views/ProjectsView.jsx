@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, Plus, ShoppingCart, X } from "lucide-react";
+import { BarChart3, CheckCircle2, Clock3, Plus, ShoppingCart, X } from "lucide-react";
 import Card from "../components/Card";
 import DataTable from "../components/DataTable";
+import SeverityHighlight from "../components/SeverityHighlight";
+import SmartEmptyState from "../components/SmartEmptyState";
 import StatusBadge from "../components/StatusBadge";
 import Button from "../components/Button";
 import { formatDate } from "../utils/dateUtils";
@@ -50,7 +52,7 @@ function historicalSuppliers(line, allLines, projectCode) {
   return [...new Set(suppliers)].slice(0, 3);
 }
 
-export default function ProjectsView({ config, projects, materialLines = [], orders = [], activities = [], onUpdateProject, onCreateProcurementRequirement }) {
+export default function ProjectsView({ config, projects, materialLines = [], orders = [], activities = [], focusProjectCode, onNavigate, onUpdateProject, onCreateProcurementRequirement }) {
   const [selected, setSelected] = useState(null);
 
   // Riaggancia il progetto selezionato dopo un refresh dati (es. dopo update).
@@ -59,6 +61,14 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
     const fresh = projects.find((p) => p.id === selected.id);
     setSelected(fresh || null);
   }, [projects]);
+
+  // Drill-down da una citazione (es. da Ordini/Fornitori): apre direttamente
+  // il lavoro indicato, stesso pattern di focusOrderCode in OrdersView.
+  useEffect(() => {
+    if (!focusProjectCode) return;
+    const match = projects.find((project) => project.projectCode === focusProjectCode);
+    if (match) setSelected(match);
+  }, [focusProjectCode, projects]);
 
   const projectRows = useMemo(() => projects.map((project) => {
     const linkedLines = materialLines.filter((line) => line.projectId === project.id || line.projectCode === project.projectCode);
@@ -89,24 +99,51 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
     { key: "dueDate", label: config.terminology.dueDate }
   ];
 
+  const riskSummary = useMemo(() => {
+    const atRisk = projectRows.filter((row) => row.operationalRisk === "A rischio").length;
+    const toFollow = projectRows.filter((row) => row.operationalRisk === "Da seguire").length;
+    const underControl = projectRows.filter((row) => row.operationalRisk === "Sotto controllo").length;
+    const items = [];
+    if (atRisk) items.push({ label: "A rischio", value: atRisk, severity: "critical" });
+    if (toFollow) items.push({ label: "Da seguire", value: toFollow, severity: "warning" });
+    if (underControl) items.push({ label: "Sotto controllo", value: underControl, severity: "success" });
+    return items;
+  }, [projectRows]);
+
   return (
     <div className="flex min-h-[calc(100vh-104px)] flex-col gap-4 xl:flex-row xl:gap-0">
       <main className="min-w-0 flex-1 xl:pr-4">
-        <Card title={config.terminology.projectsPlural}>
-          <DataTable
-            columns={columns}
-            rows={projectRows}
-            onRowClick={setSelected}
-            renderCell={(row, key) => {
-              if (key === "status") return <StatusBadge status={row.status} />;
-              if (key === "customerRequirementCount") return row.customerRequirementCount || "Nessun dato";
-              if (key === "procurementCount") return row.procurementCount ? `${row.pendingMaterialCount}/${row.procurementCount} da completare` : "Nessuno definito";
-              if (key === "operationalRisk") return <OperationalRiskBadge value={row.operationalRisk} />;
-              if (key === "dueDate") return formatDate(row[key]);
-              return row[key];
-            }}
+        {riskSummary.length > 0 && (
+          <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {riskSummary.map((item) => (
+              <SeverityHighlight key={item.label} label={item.label} value={item.value} severity={item.severity} />
+            ))}
+          </div>
+        )}
+        {projectRows.length ? (
+          <Card title={config.terminology.projectsPlural}>
+            <DataTable
+              columns={columns}
+              rows={projectRows}
+              onRowClick={setSelected}
+              renderCell={(row, key) => {
+                if (key === "status") return <StatusBadge status={row.status} />;
+                if (key === "customerRequirementCount") return row.customerRequirementCount || "Nessun dato";
+                if (key === "procurementCount") return row.procurementCount ? `${row.pendingMaterialCount}/${row.procurementCount} da completare` : "Nessuno definito";
+                if (key === "operationalRisk") return <OperationalRiskBadge value={row.operationalRisk} />;
+                if (key === "dueDate") return formatDate(row[key]);
+                return row[key];
+              }}
+            />
+          </Card>
+        ) : (
+          <SmartEmptyState
+            icon={BarChart3}
+            title={`Nessun ${config.terminology.projectSingular.toLowerCase()} registrato`}
+            description="I lavori compariranno quando OrderWatch riconosce una richiesta cliente collegata a un progetto."
+            actions={onNavigate ? [{ label: "Apri le azioni di oggi", onClick: () => onNavigate("dashboard") }] : []}
           />
-        </Card>
+        )}
       </main>
       <ProjectDetailPanel
         project={selected}
@@ -114,6 +151,7 @@ export default function ProjectsView({ config, projects, materialLines = [], ord
         materialLines={materialLines}
         orders={orders}
         activities={activities}
+        onNavigate={onNavigate}
         onClose={() => setSelected(null)}
         onUpdateProject={onUpdateProject}
         onCreateProcurementRequirement={onCreateProcurementRequirement}
@@ -137,7 +175,7 @@ function OperationalRiskBadge({ value }) {
   );
 }
 
-function ProjectDetailPanel({ project, terminology, materialLines, orders, activities, onClose, onUpdateProject, onCreateProcurementRequirement }) {
+function ProjectDetailPanel({ project, terminology, materialLines, orders, activities, onNavigate, onClose, onUpdateProject, onCreateProcurementRequirement }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -387,8 +425,23 @@ function ProjectDetailPanel({ project, terminology, materialLines, orders, activ
                         <state.Icon className="h-3 w-3" /> {state.label}
                       </span>
                     </div>
-                    {line.supplierName && <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Fornitore: <span className="font-medium" style={{ color: "var(--color-text)" }}>{line.supplierName}</span></div>}
-                    {!line.supplierName && previousSuppliers.length > 0 && <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>Acquisti simili: <span className="font-medium" style={{ color: "var(--color-text)" }}>{previousSuppliers.join(", ")}</span></div>}
+                    {line.supplierName && (
+                      <div className="mt-2 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+                        Fornitore: {onNavigate ? (
+                          <Citation onClick={() => onNavigate("suppliers", { supplierName: line.supplierName })}>{line.supplierName}</Citation>
+                        ) : (
+                          <span className="font-medium" style={{ color: "var(--color-text)" }}>{line.supplierName}</span>
+                        )}
+                      </div>
+                    )}
+                    {!line.supplierName && previousSuppliers.length > 0 && (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px]" style={{ color: "var(--color-text-muted)" }}>
+                        Acquisti simili:
+                        {onNavigate
+                          ? previousSuppliers.map((name) => <Citation key={name} onClick={() => onNavigate("suppliers", { supplierName: name })}>{name}</Citation>)
+                          : <span className="font-medium" style={{ color: "var(--color-text)" }}>{previousSuppliers.join(", ")}</span>}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -402,7 +455,11 @@ function ProjectDetailPanel({ project, terminology, materialLines, orders, activ
               {linkedOrders.map((order) => (
                 <div key={order.id} className="flex items-center justify-between gap-2 rounded-md border p-2 text-[13px]" style={{ borderColor: "var(--color-border)" }}>
                   <div className="min-w-0 truncate">
-                    <span className="font-medium">{order.orderCode}</span> — {order.supplierName || "fornitore"}
+                    {onNavigate ? (
+                      <Citation onClick={() => onNavigate("orders", { orderCode: order.orderCode })}>{order.orderCode}</Citation>
+                    ) : (
+                      <span className="font-medium">{order.orderCode}</span>
+                    )} — {order.supplierName || "fornitore"}
                   </div>
                   <StatusBadge status={order.status} />
                 </div>
@@ -452,4 +509,19 @@ function Section({ title, children }) {
 
 function EmptyHint({ text }) {
   return <div className="text-[13px]" style={{ color: "var(--color-text-muted)" }}>{text}</div>;
+}
+
+// Stesso stile dei chip citazione di AlteraView: porta dritti al dato
+// collegato invece di lasciarlo come testo statico.
+function Citation({ onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-full border px-2.5 py-1 text-xs font-semibold"
+      style={{ borderColor: "var(--color-border)" }}
+    >
+      {children}
+    </button>
+  );
 }

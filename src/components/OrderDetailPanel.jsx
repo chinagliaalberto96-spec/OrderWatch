@@ -8,7 +8,7 @@ import Button from "./Button";
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
 const BUYER_STATUSES = ["In attesa", "Confermato", "Ricevuto", "Annullato"];
 
-export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder }) {
+export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder, onNavigate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -112,7 +112,15 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
             {rows.map(([label, value]) => (
               <div key={label} className="grid grid-cols-[140px_1fr] gap-3 text-sm">
                 <dt style={{ color: "var(--color-text-muted)" }}>{label}</dt>
-                <dd className="font-medium">{value}</dd>
+                <dd className="font-medium">
+                  {label === terminology.supplierSingular && value !== "-" && onNavigate ? (
+                    <Citation onClick={() => onNavigate("suppliers", { supplierName: value })}>{value}</Citation>
+                  ) : label === terminology.projectSingular && value !== "-" && onNavigate ? (
+                    <Citation onClick={() => onNavigate("projects", { projectCode: value })}>{value}</Citation>
+                  ) : (
+                    value
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
@@ -255,5 +263,20 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
         )}
       </div>
     </aside>
+  );
+}
+
+// Stesso stile dei chip citazione di AlteraView: porta dritti al dato
+// collegato invece di lasciarlo come testo statico.
+function Citation({ onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-full border px-2.5 py-1 text-xs font-semibold"
+      style={{ borderColor: "var(--color-border)" }}
+    >
+      {children}
+    </button>
   );
 }

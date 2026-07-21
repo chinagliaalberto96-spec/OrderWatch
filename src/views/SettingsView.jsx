@@ -365,6 +365,7 @@ function UserAccessPanel({ users = [], onSaveAppUser }) {
 
 function ReportRecipientsPanel({ recipients = [], onSaveReportRecipient, onDeleteReportRecipient }) {
   const [draft, setDraft] = useState({
+    id: "",
     recipientName: "",
     email: "",
     role: "Buyer",
@@ -385,6 +386,7 @@ function ReportRecipientsPanel({ recipients = [], onSaveReportRecipient, onDelet
     try {
       await onSaveReportRecipient(draft);
       setDraft({
+        id: "",
         recipientName: "",
         email: "",
         role: "Buyer",
@@ -398,6 +400,32 @@ function ReportRecipientsPanel({ recipients = [], onSaveReportRecipient, onDelet
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleEdit(recipient) {
+    setMessage("");
+    setDraft({
+      id: recipient.id || "",
+      recipientName: recipient.recipientName || "",
+      email: recipient.email || "",
+      role: recipient.role || "Buyer",
+      active: recipient.active !== false,
+      dailyReport: recipient.dailyReport !== false,
+      channel: recipient.channel || "email"
+    });
+  }
+
+  function cancelEdit() {
+    setDraft({
+      id: "",
+      recipientName: "",
+      email: "",
+      role: "Buyer",
+      active: true,
+      dailyReport: true,
+      channel: "email"
+    });
+    setMessage("");
   }
 
   async function handleDelete(recipient) {
@@ -423,7 +451,7 @@ function ReportRecipientsPanel({ recipients = [], onSaveReportRecipient, onDelet
       <div>
         {recipients.length ? (
           recipients.map((recipient) => (
-            <div key={recipient.id || recipient.email} className="grid grid-cols-[20px_1fr_110px_120px_90px] items-center gap-3 border-b py-3 last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
+            <div key={recipient.id || recipient.email} className="grid grid-cols-[20px_1fr_110px_120px_150px] items-center gap-3 border-b py-3 last:border-b-0" style={{ borderColor: "var(--color-border)" }}>
               <Bell className="h-4 w-4" style={{ color: "var(--color-primary)" }} />
               <div className="min-w-0">
                 <div className="truncate text-[13.5px] font-semibold">{recipient.recipientName}</div>
@@ -433,16 +461,27 @@ function ReportRecipientsPanel({ recipients = [], onSaveReportRecipient, onDelet
               <StatusPill tone={recipient.active && recipient.dailyReport ? "success" : "muted"}>
                 {recipient.active && recipient.dailyReport ? "Riceve report" : "Disattivo"}
               </StatusPill>
-              <button
-                type="button"
-                onClick={() => handleDelete(recipient)}
-                disabled={deletingId === recipient.id}
-                className="inline-flex items-center justify-end gap-1 text-[12px] font-semibold underline-offset-2 hover:underline disabled:opacity-60"
-                style={{ color: "var(--color-danger)" }}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {deletingId === recipient.id ? "Rimuovo" : "Rimuovi"}
-              </button>
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleEdit(recipient)}
+                  className="inline-flex items-center gap-1 text-[12px] font-semibold underline-offset-2 hover:underline"
+                  style={{ color: "var(--color-primary)" }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Modifica
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(recipient)}
+                  disabled={deletingId === recipient.id}
+                  className="inline-flex items-center gap-1 text-[12px] font-semibold underline-offset-2 hover:underline disabled:opacity-60"
+                  style={{ color: "var(--color-danger)" }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingId === recipient.id ? "Rimuovo" : "Rimuovi"}
+                </button>
+              </div>
             </div>
           ))
         ) : (
@@ -498,14 +537,26 @@ function ReportRecipientsPanel({ recipients = [], onSaveReportRecipient, onDelet
               Attivo
             </label>
           </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-md px-3 py-2 text-[12.5px] font-semibold text-white disabled:opacity-60"
-            style={{ backgroundColor: "var(--color-primary)" }}
-          >
-            {saving ? "Salvo" : "Aggiungi destinatario"}
-          </button>
+          <div className="flex items-center gap-2">
+            {draft.id && (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="rounded-md border bg-white px-3 py-2 text-[12.5px] font-semibold"
+                style={{ borderColor: "var(--color-border)" }}
+              >
+                Annulla
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md px-3 py-2 text-[12.5px] font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: "var(--color-primary)" }}
+            >
+              {saving ? "Salvo" : draft.id ? "Salva modifiche" : "Aggiungi destinatario"}
+            </button>
+          </div>
         </div>
         {message && <div className="text-[12px]" style={{ color: message.includes("Impossibile") ? "var(--color-danger)" : "var(--color-success)" }}>{message}</div>}
       </form>
@@ -979,8 +1030,8 @@ const SETTING_PRESENTATION = {
     trueLabel: "Report attivo",
     falseLabel: "Report disattivato"
   },
-  "daily_report.recipient_email": { label: "Email destinatario di riserva", description: "Usata solo se non è stato configurato un destinatario nella sezione dedicata.", emptyLabel: "Non configurata" },
-  "daily_report.recipient_name": { label: "Nome destinatario di riserva", description: "Nome mostrato nel report quando viene usato il destinatario di riserva." },
+  "daily_report.recipient_email": { label: "Email destinatario di riserva", description: "Campo storico: i destinatari attivi si modificano nella sezione Destinatari report.", emptyLabel: "Non configurata", readOnly: true },
+  "daily_report.recipient_name": { label: "Nome destinatario di riserva", description: "Campo storico: il nome effettivo si modifica nella sezione Destinatari report.", readOnly: true },
   "daily_report.recipient_source": {
     label: "Gestione dei destinatari",
     description: "I destinatari vengono gestiti dalla sezione Destinatari report.",

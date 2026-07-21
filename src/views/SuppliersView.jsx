@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import Button from "../components/Button";
 import OperationalRow from "../components/OperationalRow";
+import SeverityHighlight from "../components/SeverityHighlight";
+import SmartEmptyState from "../components/SmartEmptyState";
 import StatusBadge from "../components/StatusBadge";
 import { formatPercent } from "../utils/formatters";
 import { formatDate } from "../utils/dateUtils";
@@ -106,6 +108,7 @@ export default function SuppliersView({
   focusSupplierName,
   focusTab,
   focusMaterialLineIds = [],
+  onNavigate,
   onSupplierAction,
   onVerifyMaterialLines,
   onLinkMaterialLines,
@@ -138,7 +141,8 @@ export default function SuppliersView({
   const counts = useMemo(() => ({
     operational: enriched.filter((item) => item.registryStatus !== "candidate" && item.hasOperationalHistory).length,
     registry: enriched.filter((item) => item.registryStatus !== "candidate").length,
-    review: enriched.filter((item) => item.registryStatus === "candidate").length
+    review: enriched.filter((item) => item.registryStatus === "candidate").length,
+    criticalOperational: enriched.filter((item) => item.registryStatus !== "candidate" && item.hasOperationalHistory && item.criticalCount > 0).length
   }), [enriched]);
 
   const visible = useMemo(() => {
@@ -167,6 +171,7 @@ export default function SuppliersView({
         orders={orders}
         initialTab={focusTab}
         focusMaterialLineIds={focusMaterialLineIds}
+        onNavigate={onNavigate}
         onBack={() => setSelectedId(null)}
         onSupplierAction={onSupplierAction}
         onVerifyMaterialLines={onVerifyMaterialLines}
@@ -203,6 +208,12 @@ export default function SuppliersView({
         <ViewTab active={view === "review"} onClick={() => setView("review")} label="Da verificare" count={counts.review} />
       </nav>
 
+      {view === "operational" && counts.criticalOperational > 0 && (
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <SeverityHighlight label="Con criticita' aperte" value={counts.criticalOperational} severity="critical" />
+        </div>
+      )}
+
       <div className="mt-3 hidden grid-cols-[minmax(240px,1.5fr)_120px_150px_140px_32px] gap-4 px-4 py-2 text-xs font-semibold uppercase md:grid" style={{ color: "var(--color-text-muted)" }}>
         <span>Fornitore</span>
         <span>Ordini aperti</span>
@@ -238,12 +249,19 @@ export default function SuppliersView({
           </button>
         ))}
         {!visible.length && (
-          <div className="px-6 py-14 text-center">
-            <div className="font-medium">Nessun fornitore in questa vista</div>
-            <div className="mt-1 text-sm" style={{ color: "var(--color-text-muted)" }}>
-              {query ? "Prova a modificare la ricerca." : "I nuovi soggetti da controllare compariranno qui."}
-            </div>
-          </div>
+          <SmartEmptyState
+            icon={Users}
+            title="Nessun fornitore in questa vista"
+            description={query
+              ? "Prova a modificare la ricerca."
+              : view === "review"
+                ? "I nuovi soggetti da controllare compariranno qui quando il sistema li rileva da un'email."
+                : "I fornitori compariranno qui quando OrderWatch riconosce un ordine, un DDT o un preventivo."}
+            actions={!query && view !== "review" ? [
+              { label: "Vedi i soggetti da verificare", onClick: () => setView("review") },
+              ...(onNavigate ? [{ label: "Apri Importazioni email", onClick: () => onNavigate("imports") }] : [])
+            ] : []}
+          />
         )}
       </div>
     </div>
@@ -258,6 +276,7 @@ function SupplierProfile({
   orders = [],
   initialTab,
   focusMaterialLineIds = [],
+  onNavigate,
   onBack,
   onSupplierAction,
   onVerifyMaterialLines,
@@ -420,13 +439,14 @@ function SupplierProfile({
 
       <div className="pt-7">
         {tab === "overview" && <Overview supplier={supplier} contacts={contacts} />}
-        {tab === "orders" && <OrdersList orders={supplier.supplierOrders} />}
+        {tab === "orders" && <OrdersList orders={supplier.supplierOrders} onNavigate={onNavigate} />}
         {tab === "materials" && (
           <MaterialsList
             lines={supplier.supplierLines}
             focusLineIds={focusMaterialLineIds}
             selectedLineIds={selectedLineIds}
             onSelectionChange={setSelectedLineIds}
+            onNavigate={onNavigate}
             projects={projects}
             orders={orders}
             linking={linking}
@@ -488,17 +508,21 @@ function Overview({ supplier, contacts }) {
   );
 }
 
-function OrdersList({ orders }) {
+function OrdersList({ orders, onNavigate }) {
   if (!orders.length) return <EmptyState text="Nessun ordine collegato a questo fornitore." />;
+  const clickable = Boolean(onNavigate);
   return (
     <div className="border-y" style={{ borderColor: "var(--color-border)" }}>
       {orders.map((order) => (
         <OperationalRow
           key={order.id}
-          title={order.orderCode || "Ordine senza codice"}
+          title={clickable && order.orderCode
+            ? <span style={{ color: "var(--color-primary)" }}>{order.orderCode}</span>
+            : order.orderCode || "Ordine senza codice"}
           subtitle={order.material || "Materiale non specificato"}
           meta={formatDate(order.dueDate) || "Senza data"}
           status={<StatusBadge status={order.status} />}
+          onOpen={clickable ? () => onNavigate("orders", { orderCode: order.orderCode }) : undefined}
         />
       ))}
     </div>
@@ -510,6 +534,7 @@ function MaterialsList({
   focusLineIds = [],
   selectedLineIds = [],
   onSelectionChange,
+  onNavigate,
   projects = [],
   orders = [],
   linking,
@@ -599,12 +624,14 @@ function MaterialsList({
               onClick: () => onVerify([line.id])
             }
           ] : [];
+          const openOrderCode = onNavigate && line.orderCode ? () => onNavigate("orders", { orderCode: line.orderCode }) : undefined;
           return (
             <OperationalRow
               key={line.id}
               rowId={`supplier-material-${line.id}`}
               title={line.description || "Materiale"}
               subtitle={[line.orderCode || line.sourceType || "Origine non indicata", line.quantity ? `${line.quantity}${line.unit ? ` ${line.unit}` : ""}` : null].filter(Boolean).join(" · ")}
+              onOpen={openOrderCode}
               meta={formatDate(line.dueDate || line.requiredDate) || "Senza data"}
               status={<StatusBadge status={line.status} />}
               selected={selected.has(line.id)}

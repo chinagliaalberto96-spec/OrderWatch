@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Bot, MessageSquarePlus, Send, ShieldCheck, Sparkles } from "lucide-react";
+import SeverityHighlight from "../components/SeverityHighlight";
 
 const STARTERS = [
   "Cosa devo controllare oggi?",
@@ -190,7 +191,9 @@ function Message({ message, onNavigate }) {
       <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
       {assistant && highlights.length > 0 && (
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          {highlights.map((item, index) => <Highlight key={`${item.label}-${index}`} item={item} />)}
+          {highlights.map((item, index) => (
+            <SeverityHighlight key={`${item.label}-${index}`} label={item.label} value={item.value} severity={item.severity} />
+          ))}
         </div>
       )}
       {assistant && citations.length > 0 && (
@@ -204,15 +207,4 @@ function Message({ message, onNavigate }) {
       )}
     </article>
   );
-}
-
-function Highlight({ item }) {
-  const colors = {
-    critical: ["#FFF1F0", "var(--color-danger)"],
-    warning: ["#FFF8E8", "#9A6700"],
-    success: ["#ECF8F1", "var(--color-success)"],
-    info: ["var(--color-muted)", "var(--color-text)"]
-  };
-  const [backgroundColor, color] = colors[item.severity] || colors.info;
-  return <div className="rounded-lg px-3 py-2.5" style={{ backgroundColor, color }}><div className="text-[11px] font-semibold uppercase">{item.label}</div><div className="mt-1 text-sm font-medium">{item.value}</div></div>;
 }
