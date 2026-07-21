@@ -648,7 +648,7 @@ function createMailboxDraft(role = "General", provider = "Hostinger") {
   };
 }
 
-function MailboxPanel({ mailboxes = [], onSaveMailbox, onTestMailbox, onDisconnectMailbox, managementEnabled = true }) {
+function MailboxPanel({ mailboxes = [], onSaveMailbox, onTestMailbox, onDisconnectMailbox, managementEnabled = false }) {
   const [draft, setDraft] = useState(createMailboxDraft("Owner"));
   const [formOpen, setFormOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -1496,7 +1496,7 @@ export default function SettingsView({
   onSaveMailbox,
   onTestMailbox,
   onDisconnectMailbox,
-  mailboxManagementEnabled = true,
+  mailboxManagementEnabled = false,
   onNavigate
 }) {
   const { mode, lastUpdated, counts = {} } = meta;

@@ -1,8 +1,9 @@
 import nodemailer from "nodemailer";
 import { decryptSecret } from "./_mailboxCrypto.js";
+import { normalizePublicMailHostname, resolvePublicMailHost } from "./_mailHostSecurity.js";
 
 export function buildMailboxSmtpOptions(mailbox, password) {
-  const host = String(mailbox?.smtp_host || "").trim();
+  const host = normalizePublicMailHostname(mailbox?.smtp_host);
   const user = String(mailbox?.email_address || "").trim();
   const port = Number(mailbox?.smtp_port || 465);
 
@@ -24,13 +25,18 @@ export function buildMailboxSmtpOptions(mailbox, password) {
   };
 }
 
-export function createMailboxSmtpTransport(mailbox, {
+export async function createMailboxSmtpTransport(mailbox, {
   dryRun = false,
   decrypt = decryptSecret,
-  createTransport = nodemailer.createTransport
+  createTransport = nodemailer.createTransport,
+  resolveHost = resolvePublicMailHost
 } = {}) {
   if (dryRun) return createTransport({ jsonTransport: true });
 
   const password = decrypt(mailbox?.encrypted_password);
-  return createTransport(buildMailboxSmtpOptions(mailbox, password));
+  const target = await resolveHost(mailbox?.smtp_host);
+  const options = buildMailboxSmtpOptions(mailbox, password);
+  options.host = target.address;
+  options.tls.servername = target.hostname;
+  return createTransport(options);
 }

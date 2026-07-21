@@ -136,9 +136,9 @@ await check("SMTP non-465 enforces STARTTLS and ignores smtp_secure", () => {
   assert.equal(options.tls.minVersion, "TLSv1.2");
 });
 
-await check("transport creation is dependency-injected without mutating ESM exports", () => {
+await check("transport creation is dependency-injected without mutating ESM exports", async () => {
   let received;
-  const transport = createMailboxSmtpTransport(mailbox(), {
+  const transport = await createMailboxSmtpTransport(mailbox(), {
     decrypt: (ciphertext) => {
       assert.equal(ciphertext, "encrypted-test-secret");
       return "app-password";
@@ -146,25 +146,30 @@ await check("transport creation is dependency-injected without mutating ESM expo
     createTransport: (options) => {
       received = options;
       return { sendMail: async () => ({ messageId: "test-message" }) };
-    }
+    },
+    resolveHost: async () => ({ hostname: "smtp.example.test", address: "93.184.216.34" })
   });
   assert.equal(typeof transport.sendMail, "function");
   assert.equal(received.auth.pass, "app-password");
   assert.equal(received.tls.rejectUnauthorized, true);
+  assert.equal(received.host, "93.184.216.34");
+  assert.equal(received.tls.servername, "smtp.example.test");
 });
 
-await check("decryption errors are redactable and never reach transport", () => {
+await check("decryption errors are redactable and never reach transport", async () => {
   const secret = "credential-value-that-must-not-leak";
   let transportCalled = false;
   let caught;
-  try {
+  await assert.rejects(
     createMailboxSmtpTransport(mailbox(), {
       decrypt: () => { throw new Error(`password=${secret}`); },
       createTransport: () => { transportCalled = true; }
-    });
-  } catch (error) {
-    caught = error;
-  }
+    }),
+    (error) => {
+      caught = error;
+      return true;
+    }
+  );
   assert.equal(transportCalled, false);
   assert.equal(sanitizeSecurityError(caught).includes(secret), false);
 });

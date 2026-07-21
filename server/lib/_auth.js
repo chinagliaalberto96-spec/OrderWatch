@@ -3,10 +3,9 @@ import { sanitizeSecurityError } from "./_securityRedaction.js";
 
 const ROLE_SET = new Set(["Owner", "IT", "Admin", "Buyer", "ReadOnly"]);
 
-// Tenant storico: Graphic Center resta in modalita' legacy (nessun utente
-// Supabase Auth, nessuna scelta lato client). Lo slug e' configurabile via
-// env solo per test/manutenzione; il valore che conta in produzione e'
-// sempre "graphic-center", mai un parametro passato dal browser.
+// Tenant legacy disponibile esclusivamente per sviluppo/manutenzione locale.
+// In produzione l'autenticazione Supabase e' obbligatoria e il tenant non
+// deriva mai da un parametro passato dal browser.
 const LEGACY_ORGANIZATION_SLUG = process.env.LEGACY_ORGANIZATION_SLUG || "graphic-center";
 
 let legacyOrgCache = null;

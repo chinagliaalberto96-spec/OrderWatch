@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 const files = {
   auth: fs.readFileSync("server/lib/_auth.js", "utf8"),
+  mailHost: fs.readFileSync("server/lib/_mailHostSecurity.js", "utf8"),
   smtp: fs.readFileSync("server/lib/_smtpTransport.js", "utf8"),
   session: fs.readFileSync("api/session.js", "utf8"),
   customer: fs.readFileSync("server/routes/customer-confirmations.js", "utf8"),
@@ -63,6 +64,12 @@ check("SMTP helper enforces TLS policy", () => {
   assert.match(files.smtp, /requireTLS: true/);
   assert.match(files.smtp, /rejectUnauthorized: true/);
   assert.match(files.smtp, /minVersion: "TLSv1\.2"/);
+});
+
+check("mail transports pin DNS to public addresses", () => {
+  assert.match(files.mailHost, /resolvePublicMailHost/);
+  assert.match(files.smtp, /options\.host = target\.address/);
+  assert.match(files.smtp, /options\.tls\.servername = target\.hostname/);
 });
 
 check("tests contain no unconditional success escape", () => {

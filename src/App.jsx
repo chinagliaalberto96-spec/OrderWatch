@@ -48,6 +48,8 @@ const viewLabels = (terminology) => ({
 
 const REFRESH_INTERVAL_MS = 60000;
 const USES_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === "true";
+const MAILBOX_MANAGEMENT_ENABLED =
+  AUTH_MODE === "supabase" && import.meta.env.VITE_MAILBOX_MANAGEMENT_ENABLED === "true";
 const SEEN_REVIEW_ITEMS_KEY = "orderwatch-seen-review-items";
 // Item gia' mostrati dal badge: il contatore rosso conta solo le notifiche
 // mai viste; aprire il dropdown le marca tutte viste (senza eliminarle dalla
@@ -812,7 +814,7 @@ export default function App() {
               onSaveMailbox={handleSaveMailbox}
               onTestMailbox={handleTestMailbox}
               onDisconnectMailbox={handleDisconnectMailbox}
-              mailboxManagementEnabled={AUTH_MODE === "supabase"}
+              mailboxManagementEnabled={MAILBOX_MANAGEMENT_ENABLED}
               onNavigate={handleNavigate}
               meta={{
                 mode: USES_MOCK_DATA ? "mock" : "live",

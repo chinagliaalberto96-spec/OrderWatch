@@ -15,6 +15,11 @@ const {
 } = await import("../server/routes/mailboxes.js");
 const { requireApiUser } = await import("../server/lib/_auth.js");
 const { encryptSecret, decryptSecret } = await import("../server/lib/_mailboxCrypto.js");
+const {
+  isNonPublicIpAddress,
+  normalizePublicMailHostname,
+  resolvePublicMailHost
+} = await import("../server/lib/_mailHostSecurity.js");
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const mailboxId = "00000000-0000-4000-8000-000000000002";
@@ -101,6 +106,13 @@ await check("production legacy is always fail-closed", async () => {
   await handler(requestMock(), response);
   assert.equal(response.statusCode, 503);
   assert.deepEqual(response.body, { error: "Mailbox management temporarily unavailable" });
+});
+
+await check("mailbox management requires the explicit flag in every environment", async () => {
+  assert.equal(isMailboxManagementEnabled({ AUTH_MODE: "supabase" }), false);
+  assert.equal(isMailboxManagementEnabled({ VERCEL_ENV: "preview", AUTH_MODE: "supabase" }), false);
+  assert.equal(isMailboxManagementEnabled({ AUTH_MODE: "supabase", MAILBOX_MANAGEMENT_ENABLED: "false" }), false);
+  assert.equal(isMailboxManagementEnabled({ AUTH_MODE: "supabase", MAILBOX_MANAGEMENT_ENABLED: "true" }), true);
 });
 
 await check("GET without session returns 401 when secure management is enabled", async () => {
@@ -283,6 +295,25 @@ await check("normalizer ignores browser secure=false", async () => {
   });
   assert.equal(normalized.imap_secure, true);
   assert.equal(normalized.smtp_secure, true);
+});
+
+await check("mail hosts reject direct and DNS-resolved private targets", async () => {
+  for (const host of ["127.0.0.1", "169.254.169.254", "mail.internal", "localhost"]) {
+    assert.throws(() => normalizePublicMailHostname(host));
+  }
+  assert.equal(isNonPublicIpAddress("10.0.0.8"), true);
+  assert.equal(isNonPublicIpAddress("fd00::1"), true);
+  assert.equal(isNonPublicIpAddress("::ffff:7f00:1"), true);
+  assert.equal(isNonPublicIpAddress("64:ff9b::7f00:1"), true);
+  assert.equal(isNonPublicIpAddress("93.184.216.34"), false);
+  await assert.rejects(
+    resolvePublicMailHost("mail.example.com", async () => [{ address: "169.254.169.254", family: 4 }])
+  );
+  const target = await resolvePublicMailHost(
+    "mail.example.com",
+    async () => [{ address: "93.184.216.34", family: 4 }]
+  );
+  assert.deepEqual(target, { hostname: "mail.example.com", address: "93.184.216.34" });
 });
 
 await check("safe mapper never exposes raw credential or server fields", async () => {

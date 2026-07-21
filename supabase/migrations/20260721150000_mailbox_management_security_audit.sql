@@ -16,8 +16,10 @@ create table if not exists public.mailbox_management_audit_logs (
 );
 
 alter table public.mailbox_management_audit_logs enable row level security;
+alter table public.mailbox_management_audit_logs force row level security;
 
-revoke all on table public.mailbox_management_audit_logs from anon, authenticated;
+revoke all on table public.mailbox_management_audit_logs from public, anon, authenticated, service_role;
+grant select, insert, update on table public.mailbox_management_audit_logs to service_role;
 
 create index if not exists mailbox_management_audit_org_created_idx
   on public.mailbox_management_audit_logs (organization_id, created_at desc);
@@ -31,4 +33,4 @@ create index if not exists mailbox_management_audit_actor_created_idx
   where actor_app_user_id is not null;
 
 comment on table public.mailbox_management_audit_logs is
-  'Registro append-only delle operazioni di gestione mailbox; accessibile soltanto dal backend service-role.';
+  'Registro audit delle operazioni di gestione mailbox; accessibile soltanto dal backend service-role e senza permesso DELETE.';

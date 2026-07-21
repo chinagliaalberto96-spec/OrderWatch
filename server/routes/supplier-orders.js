@@ -513,7 +513,7 @@ async function sendOrder(body, organizationId) {
   const dryRun = String(process.env.SUPPLIER_ORDER_SMTP_DRY_RUN || "").toLowerCase() === "true";
   try {
     const mailbox = await chooseMailbox(body.senderMailboxId || dispatch.sender_mailbox_id, organizationId);
-    const transporter = createMailboxSmtpTransport(mailbox, { dryRun });
+    const transporter = await createMailboxSmtpTransport(mailbox, { dryRun });
     const attachments = [];
     if (body.attachPdf !== false) {
       try {
@@ -650,7 +650,7 @@ async function sendReminder(body, organizationId) {
   const dryRun = String(process.env.SUPPLIER_ORDER_SMTP_DRY_RUN || "").toLowerCase() === "true";
   try {
     const mailbox = await chooseMailbox(body.senderMailboxId || dispatch?.sender_mailbox_id, organizationId);
-    const transporter = createMailboxSmtpTransport(mailbox, { dryRun });
+    const transporter = await createMailboxSmtpTransport(mailbox, { dryRun });
     const result = await transporter.sendMail({
       from: mailbox.email_address,
       to: reminder.supplier_email,

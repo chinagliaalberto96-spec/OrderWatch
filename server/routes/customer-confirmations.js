@@ -210,7 +210,7 @@ async function sendConfirmation(body, organizationId) {
 
   try {
     const mailbox = await chooseMailbox(body.senderMailboxId, organizationId);
-    const transporter = createMailboxSmtpTransport(mailbox);
+    const transporter = await createMailboxSmtpTransport(mailbox);
     const result = await transporter.sendMail({
       from: mailbox.email_address,
       to: confirmation.customer_email,

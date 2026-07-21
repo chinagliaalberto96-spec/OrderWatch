@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { ImapFlow } from "imapflow";
 import { encryptSecret } from "../lib/_mailboxCrypto.js";
+import { normalizePublicMailHostname, resolvePublicMailHost } from "../lib/_mailHostSecurity.js";
 import { publicMailboxError, sanitizeSecurityError } from "../lib/_securityRedaction.js";
 import { supabaseRequest, orgFilter, withOrg } from "../lib/_supabaseRest.js";
 import { authorizeApiRequest } from "../lib/_auth.js";
@@ -14,11 +15,9 @@ const RATE_LIMIT_MAX_REQUESTS = 20;
 const rateLimitBuckets = new Map();
 
 export function isMailboxManagementEnabled(env = process.env) {
-  const secureAuth = env.AUTH_MODE === "supabase";
-  if (env.VERCEL_ENV === "production") {
-    return secureAuth && env.MAILBOX_MANAGEMENT_ENABLED === "true";
-  }
-  return secureAuth;
+  const secureAuth = String(env.AUTH_MODE || "").trim() === "supabase";
+  const explicitlyEnabled = String(env.MAILBOX_MANAGEMENT_ENABLED || "").trim().toLowerCase() === "true";
+  return secureAuth && explicitlyEnabled;
 }
 
 export function mapMailbox(row) {
@@ -53,10 +52,10 @@ export function normalizeMailbox(body = {}, { includePassword = false } = {}) {
     role: ROLE_SET.has(body.role) ? body.role : "General",
     provider,
     active: body.active !== false,
-    imap_host: normalizeMailHost(body.imapHost || defaultImapHost(provider)),
+    imap_host: normalizePublicMailHostname(body.imapHost || defaultImapHost(provider)),
     imap_port: imapPort,
     imap_secure: true,
-    smtp_host: normalizeMailHost(body.smtpHost || defaultSmtpHost(provider)),
+    smtp_host: normalizePublicMailHostname(body.smtpHost || defaultSmtpHost(provider)),
     smtp_port: smtpPort,
     smtp_secure: smtpPort === 465,
     mailbox_source: emailAddress,
@@ -95,22 +94,16 @@ function normalizePort(value, fallback) {
   return port;
 }
 
-function normalizeMailHost(value) {
-  const host = String(value || "").trim().toLowerCase();
-  if (!host || host === "localhost" || host.endsWith(".local") || !/^[a-z0-9.-]+$/.test(host)) {
-    throw new Error("Host mail non valido.");
-  }
-  return host;
-}
-
-export async function testImap({ host, port, email, password }) {
+export async function testImap({ host, port, email, password }, { resolveHost = resolvePublicMailHost } = {}) {
+  const target = await resolveHost(host);
   const client = new ImapFlow({
-    host,
+    host: target.address,
     port,
     secure: true,
     tls: {
       minVersion: "TLSv1.2",
-      rejectUnauthorized: true
+      rejectUnauthorized: true,
+      servername: target.hostname
     },
     auth: { user: email, pass: password },
     logger: false
@@ -128,8 +121,18 @@ export async function testImap({ host, port, email, password }) {
   }
 }
 
-export function enforceMailboxRateLimit(request, response, now = Date.now()) {
-  const key = requestFingerprint(request);
+export function enforceMailboxRateLimit(request, response, now = Date.now(), scope = "") {
+  scope = String(scope || "");
+  const key = `${scope}:${requestFingerprint(request)}`;
+  if (rateLimitBuckets.size >= 1_000) {
+    for (const [bucketKey, bucket] of rateLimitBuckets) {
+      if (now - bucket.startedAt >= RATE_LIMIT_WINDOW_MS) rateLimitBuckets.delete(bucketKey);
+    }
+    if (rateLimitBuckets.size >= 1_000 && !rateLimitBuckets.has(key)) {
+      response.status(429).json({ error: "Troppe richieste. Riprovare più tardi." });
+      return false;
+    }
+  }
   const current = rateLimitBuckets.get(key);
   if (!current || now - current.startedAt >= RATE_LIMIT_WINDOW_MS) {
     rateLimitBuckets.set(key, { startedAt: now, count: 1 });
@@ -164,9 +167,10 @@ async function createAuditRecord({ request, user, action, mailboxId, emailAddres
   return rows[0].id;
 }
 
-async function finishAuditRecord(auditId, outcome, requestDb = supabaseRequest) {
+async function finishAuditRecord(auditId, outcome, requestDb = supabaseRequest, organizationId = null) {
   if (!auditId) return;
-  await requestDb(`mailbox_management_audit_logs?id=eq.${encodeURIComponent(auditId)}`, {
+  const tenantFilter = organizationId ? `&${orgFilter(organizationId)}` : "";
+  await requestDb(`mailbox_management_audit_logs?id=eq.${encodeURIComponent(auditId)}${tenantFilter}`, {
     method: "PATCH",
     body: { outcome },
     headers: { Prefer: "return=minimal" }
@@ -189,13 +193,12 @@ export function createMailboxHandler({
       return;
     }
 
-    if (!rateLimit(request, response)) return;
-
     const user = await authorize(request, response, {
       roles: ALLOWED_MANAGEMENT_ROLES,
       requireSecureAuth: true
     });
     if (!user) return;
+    if (!rateLimit(request, response, Date.now(), user.id)) return;
 
     let auditId = null;
     try {
@@ -228,14 +231,14 @@ export function createMailboxHandler({
         }, requestDb);
 
         if (body.id && !requestedMailbox) {
-          await auditFinish(auditId, "not_found", requestDb);
+          await auditFinish(auditId, "not_found", requestDb, user.organizationId);
           response.status(404).json({ error: "Mailbox not found." });
           return;
         }
 
         if (action === "disconnect") {
           if (!body.id) {
-            await auditFinish(auditId, "rejected", requestDb);
+            await auditFinish(auditId, "rejected", requestDb, user.organizationId);
             response.status(400).json({ error: "Missing mailbox id." });
             return;
           }
@@ -250,11 +253,11 @@ export function createMailboxHandler({
             headers: { Prefer: "return=representation" }
           });
           if (!rows?.[0]) {
-            await auditFinish(auditId, "not_found", requestDb);
+            await auditFinish(auditId, "not_found", requestDb, user.organizationId);
             response.status(404).json({ error: "Mailbox not found." });
             return;
           }
-          await auditFinish(auditId, "succeeded", requestDb);
+          await auditFinish(auditId, "succeeded", requestDb, user.organizationId);
           response.status(200).json({ mailbox: mapMailbox(rows[0]) });
           return;
         }
@@ -276,12 +279,12 @@ export function createMailboxHandler({
               headers: { Prefer: "return=representation" }
             });
             if (!testedRows?.[0]) {
-              await auditFinish(auditId, "not_found", requestDb);
+              await auditFinish(auditId, "not_found", requestDb, user.organizationId);
               response.status(404).json({ error: "Mailbox not found." });
               return;
             }
           }
-          await auditFinish(auditId, "succeeded", requestDb);
+          await auditFinish(auditId, "succeeded", requestDb, user.organizationId);
           response.status(200).json({ test: testResult });
           return;
         }
@@ -311,12 +314,12 @@ export function createMailboxHandler({
             });
 
         if (!rows?.[0]) {
-          await auditFinish(auditId, "not_found", requestDb);
+          await auditFinish(auditId, "not_found", requestDb, user.organizationId);
           response.status(404).json({ error: "Mailbox not found." });
           return;
         }
 
-        await auditFinish(auditId, "succeeded", requestDb);
+        await auditFinish(auditId, "succeeded", requestDb, user.organizationId);
         response.status(200).json({ mailbox: mapMailbox(rows[0]), test: testResult });
         return;
       }
@@ -326,7 +329,7 @@ export function createMailboxHandler({
     } catch (error) {
       if (auditId) {
         try {
-          await auditFinish(auditId, "failed", requestDb);
+          await auditFinish(auditId, "failed", requestDb, user.organizationId);
         } catch (auditError) {
           console.warn("[mailboxes] aggiornamento audit fallito:", sanitizeSecurityError(auditError));
         }
