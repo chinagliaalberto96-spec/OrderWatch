@@ -13,6 +13,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test:auth": "node --env-file-if-exists=.env.local scripts/test-secure-auth.js",
+    "test:mailbox-security": "node scripts/test-mailbox-security.mjs",
+    "test:legacy-mailbox-security": "node scripts/test-legacy-mailbox-static.mjs && node scripts/test-legacy-mailbox-security.mjs",
     "tenant:preview": "node scripts/provision-organization.js",
     "tenant:test": "node scripts/provision-organization.js --temporary-test --execute",
     "platform-admin": "node scripts/provision-platform-admin.js",
