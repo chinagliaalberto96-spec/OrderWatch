@@ -648,7 +648,7 @@ function createMailboxDraft(role = "General", provider = "Hostinger") {
   };
 }
 
-function MailboxPanel({ mailboxes = [], onSaveMailbox, onTestMailbox, onDisconnectMailbox }) {
+function MailboxPanel({ mailboxes = [], onSaveMailbox, onTestMailbox, onDisconnectMailbox, managementEnabled = true }) {
   const [draft, setDraft] = useState(createMailboxDraft("Owner"));
   const [formOpen, setFormOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -706,6 +706,14 @@ function MailboxPanel({ mailboxes = [], onSaveMailbox, onTestMailbox, onDisconne
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!managementEnabled) {
+    return (
+      <div className="rounded-md border px-4 py-3 text-[12.5px]" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-muted)", color: "var(--color-text-muted)" }}>
+        La gestione delle caselle e' temporaneamente disabilitata. La configurazione esistente resta protetta e non puo' essere modificata finche' l'accesso sicuro non viene attivato.
+      </div>
+    );
   }
 
   return (
@@ -1488,6 +1496,7 @@ export default function SettingsView({
   onSaveMailbox,
   onTestMailbox,
   onDisconnectMailbox,
+  mailboxManagementEnabled = true,
   onNavigate
 }) {
   const { mode, lastUpdated, counts = {} } = meta;
@@ -1775,6 +1784,7 @@ export default function SettingsView({
             onSaveMailbox={onSaveMailbox}
             onTestMailbox={onTestMailbox}
             onDisconnectMailbox={onDisconnectMailbox}
+            managementEnabled={mailboxManagementEnabled}
           />
         </Section>
 

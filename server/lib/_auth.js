@@ -1,4 +1,5 @@
 import { getSupabaseConfig, supabaseRequest } from "./_supabaseRest.js";
+import { sanitizeSecurityError } from "./_securityRedaction.js";
 
 const ROLE_SET = new Set(["Owner", "IT", "Admin", "Buyer", "ReadOnly"]);
 
@@ -61,7 +62,12 @@ async function resolveMembership(appUserId, organizationId) {
   return memberships?.[0] || null;
 }
 
-export async function requireApiUser(request, response, { roles } = {}) {
+export async function requireApiUser(request, response, { roles, requireSecureAuth = false } = {}) {
+  if (requireSecureAuth && !usesSecureAuth()) {
+    response.status(401).json({ error: "Autenticazione sicura richiesta." });
+    return null;
+  }
+
   if (!usesSecureAuth()) {
     const organization = await resolveLegacyOrganization();
     const configuredMembershipId = String(process.env.LEGACY_ACTOR_MEMBERSHIP_ID || "").trim();
@@ -177,7 +183,8 @@ export async function authorizeApiRequest(request, response, options) {
   try {
     return await requireApiUser(request, response, options);
   } catch (error) {
-    response.status(500).json({ error: "Verifica autorizzazione non disponibile.", detail: error.message });
+    console.warn("[auth] verifica autorizzazione non disponibile:", sanitizeSecurityError(error));
+    response.status(500).json({ error: "Verifica autorizzazione non disponibile." });
     return null;
   }
 }
