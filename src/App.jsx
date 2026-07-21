@@ -812,6 +812,7 @@ export default function App() {
               onSaveMailbox={handleSaveMailbox}
               onTestMailbox={handleTestMailbox}
               onDisconnectMailbox={handleDisconnectMailbox}
+              mailboxManagementEnabled={AUTH_MODE === "supabase"}
               onNavigate={handleNavigate}
               meta={{
                 mode: USES_MOCK_DATA ? "mock" : "live",
