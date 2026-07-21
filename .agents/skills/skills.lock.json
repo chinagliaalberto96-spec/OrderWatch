@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-21",
+  "skills": [
+    {
+      "name": "supabase",
+      "repository": "supabase/agent-skills",
+      "path": "skills/supabase",
+      "commit": "1ad9aaeb49caafd9e95c0a91116f71890eebbc53"
+    },
+    {
+      "name": "supabase-postgres-best-practices",
+      "repository": "supabase/agent-skills",
+      "path": "skills/supabase-postgres-best-practices",
+      "commit": "1ad9aaeb49caafd9e95c0a91116f71890eebbc53"
+    },
+    {
+      "name": "react-best-practices",
+      "repository": "vercel-labs/agent-skills",
+      "path": "skills/react-best-practices",
+      "commit": "4559f18a20c1691c744b4395194290db6a0df5e9"
+    },
+    {
+      "name": "web-design-guidelines",
+      "repository": "vercel-labs/agent-skills",
+      "path": "skills/web-design-guidelines",
+      "commit": "4559f18a20c1691c744b4395194290db6a0df5e9",
+      "dependencies": [
+        {
+          "repository": "vercel-labs/web-interface-guidelines",
+          "path": "command.md",
+          "commit": "4e799d45c17aec1498c269287a83b9dba22b966b"
+        }
+      ]
+    },
+    {
+      "name": "playwright-cli",
+      "repository": "microsoft/playwright-cli",
+      "path": "skills/playwright-cli",
+      "commit": "eee5a185c98e6b04d88f580d45a854e9692ab50b"
+    }
+  ]
+}
