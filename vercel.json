@@ -12,6 +12,7 @@
     { "source": "/api/customer-confirmations", "destination": "/api/app?route=customer-confirmations" },
     { "source": "/api/mailboxes", "destination": "/api/app?route=mailboxes" },
     { "source": "/api/operational-actions", "destination": "/api/app?route=operational-actions" },
+    { "source": "/api/order-operational-view", "destination": "/api/app?route=order-operational-view" },
     { "source": "/api/orders", "destination": "/api/app?route=orders" },
     { "source": "/api/projects", "destination": "/api/app?route=projects" },
     { "source": "/api/receiving", "destination": "/api/app?route=receiving" },

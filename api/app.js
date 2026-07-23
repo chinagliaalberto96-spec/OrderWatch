@@ -11,6 +11,7 @@ import procurementRequirementsHandler from "../server/routes/procurement-require
 import receivingHandler from "../server/routes/receiving.js";
 import supplierOrdersHandler from "../server/routes/supplier-orders.js";
 import suppliersHandler from "../server/routes/suppliers.js";
+import orderOperationalViewHandler from "../server/routes/order-operational-view.js";
 import alteraHandler from "../server/routes/altera.js";
 import alteraTelegramHandler from "../server/routes/altera-telegram.js";
 import telegramConnectionsHandler from "../server/routes/telegram-connections.js";
@@ -25,7 +26,14 @@ const handlers = {
   "customer-confirmations": customerConfirmationsHandler,
   mailboxes: mailboxesHandler,
   "operational-actions": operationalActionsHandler,
-  orders: ordersHandler,
+  orders: async function(request, response) {
+    const route = normalizeAppRoute(request.query?.route);
+    if (route === 'order-operational-view') {
+      return orderOperationalViewHandler(request, response);
+    }
+    return ordersHandler(request, response);
+  },
+  "order-operational-view": orderOperationalViewHandler,
   projects: projectsHandler,
   "procurement-requirements": procurementRequirementsHandler,
   receiving: receivingHandler,
@@ -34,8 +42,13 @@ const handlers = {
   "telegram-connections": telegramConnectionsHandler
 };
 
+export function normalizeAppRoute(rawRoute) {
+  if (Array.isArray(rawRoute)) return String(rawRoute[0] || "").trim();
+  return String(rawRoute || "").trim();
+}
+
 export default async function handler(request, response) {
-  const route = String(request.query?.route || "").trim();
+  const route = normalizeAppRoute(request.query?.route);
   const selected = handlers[route];
   if (!selected) {
     response.status(404).json({ error: "Application route not found." });
