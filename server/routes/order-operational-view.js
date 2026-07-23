@@ -137,7 +137,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     );
   }
 
-  // 5) linkedDocuments: delivery_notes, invoices, quotes, documents
+  // 5) linkedDocuments: delivery_notes, invoices, documents
   //
   // PostgREST select= does not support SQL "column as alias" syntax — it
   // treats the whole string (e.g. "ddt_number as number") as one literal
@@ -155,17 +155,30 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
   // documents row, not on documents itself) and no "updated_at" (only
   // "created_at" — documents is an immutable ingested record). All verified
   // live, not assumed.
-  const [deliveryNotes, invoices, quotes, documents] = await Promise.all([
+  //
+  // quotes is intentionally NOT queried here: quotes has no order_id (or any
+  // other column) that identifies a specific order — verified live against
+  // information_schema.columns and information_schema foreign keys, quotes
+  // only carries project_id/project_code, which is shared by every order in
+  // the same project and would misrepresent organization/project-wide quotes
+  // as documents belonging to this one order. The only place the codebase
+  // links a quote to an order (server/routes/supplier-orders.js#markQuoteConverted)
+  // writes a free-text note onto quotes.notes ("Convertito manualmente dal
+  // buyer nell'ordine ..."), not a queryable foreign key, and canonical_operational_lines
+  // confirms no row ever carries both order_id and quote_id at once (quote_line
+  // rows: 0/34 have order_id; purchase_order_line rows: 0/5 have quote_id) —
+  // so there is no deterministic per-order quote relationship to query. Quotes
+  // are omitted from linkedDocuments until a real order_id-bearing relationship
+  // exists, per the contract's "mark unavailable or omit" rule for unproven links.
+  const [deliveryNotes, invoices, documents] = await Promise.all([
     reqDb(`delivery_notes?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,ddt_number,status,delivery_date,confidence,needs_review,source_email_id,source_document_id,updated_at`),
     reqDb(`invoices?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,invoice_number,status,invoice_date,confidence,needs_review,source_email_id,source_document_id,updated_at`),
-    reqDb(`quotes?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,quote_code,status,confidence,needs_review,source_email_id,source_document_id,updated_at`),
     reqDb(`documents?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,document_type,name,received_at,confidence,needs_review,source_email_id,created_at`)
   ]);
 
   const linkedDocuments = [
     ...(deliveryNotes || []).map((r) => ({ id: r.id, kind: 'delivery_note', number: r.ddt_number || null, status: r.status || null, receivedAt: r.delivery_date || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
     ...(invoices || []).map((r) => ({ id: r.id, kind: 'invoice', number: r.invoice_number || null, status: r.status || null, receivedAt: r.invoice_date || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
-    ...(quotes || []).map((r) => ({ id: r.id, kind: 'quote', number: r.quote_code || null, status: r.status || null, receivedAt: r.updated_at || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
     ...(documents || []).map((r) => ({ id: r.id, kind: r.document_type || 'document', number: r.name || null, status: r.status || null, receivedAt: r.received_at || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null }))
   ];
 
@@ -179,7 +192,19 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
   };
 
   // 7) anomalies & system health: include alerts that reference this order id or supplier
-  const healthRows = await reqDb(`system_health_alerts?${filter}&select=id,alert_key,severity,title,message,target_view,metadata`);
+  //
+  // system_health_alerts (view, verified live against information_schema.columns)
+  // has no "id" column — its natural key is "alert_key" (e.g. "mailbox-error:<uuid>",
+  // "extraction-errors-72h"), used here as the output identifier instead.
+  // Verified live against the view's own SQL definition: none of its 6 current
+  // alert kinds embed an order-specific identifier — mailbox alerts set
+  // entity_id to the mailbox id (not an order), and the extraction/data-quality
+  // alerts leave entity_id NULL with no orderId/orderCode key in metadata. The
+  // metadata match below is therefore expected to legitimately find nothing
+  // today; that is a correct, non-crashing "no order-linked alerts" outcome,
+  // not a bug — it only requires proof (an exact id/code match) before ever
+  // attaching an alert to this specific order, and none currently qualifies.
+  const healthRows = await reqDb(`system_health_alerts?${filter}&select=alert_key,severity,title,message,target_view,metadata`);
   const anomaliesAndAttention = [];
   for (const r of (healthRows || [])) {
     try {
@@ -190,11 +215,11 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
       const metaOrderCode = String(meta.orderCode || meta.order_code || '').trim();
       // require non-empty identifiers and exact match
       if (metaOrderId && metaOrderId.toLowerCase() === String(orderId).toLowerCase()) {
-        anomaliesAndAttention.push({ id: r.id, alertKey: r.alert_key, severity: r.severity, title: r.title, message: r.message, targetView: r.target_view });
+        anomaliesAndAttention.push({ id: r.alert_key, alertKey: r.alert_key, severity: r.severity, title: r.title, message: r.message, targetView: r.target_view });
         continue;
       }
       if (metaOrderCode && metaOrderCode.toLowerCase() === String(order.order_code || '').toLowerCase()) {
-        anomaliesAndAttention.push({ id: r.id, alertKey: r.alert_key, severity: r.severity, title: r.title, message: r.message, targetView: r.target_view });
+        anomaliesAndAttention.push({ id: r.alert_key, alertKey: r.alert_key, severity: r.severity, title: r.title, message: r.message, targetView: r.target_view });
         continue;
       }
     } catch {

@@ -78,16 +78,28 @@ async function run() {
     if (path.startsWith('invoices?')) {
       return [{ id: 'inv-1', invoice_number: 'FT-2024-055', status: 'matched', invoice_date: '2024-01-15', confidence: 0.95, needs_review: false, source_email_id: 'se-3', source_document_id: null, updated_at: '2024-01-15T09:00:00Z' }];
     }
-    if (path.startsWith('quotes?')) {
-      return [{ id: 'quo-1', quote_code: 'PRV-2024-010', status: 'converted', confidence: 0.8, needs_review: false, source_email_id: 'se-4', source_document_id: null, updated_at: '2024-01-02T09:00:00Z' }];
-    }
+    // quotes is intentionally not queried at all (see order-operational-view.js
+    // §5 comment): quotes has no order_id, and no other column deterministically
+    // ties a quote to one specific order — verified live and via
+    // supplier-orders.js#markQuoteConverted (writes a free-text note, not a
+    // foreign key). If the route ever queries 'quotes?' again this mock falls
+    // through to the catch-all `return []` below, and the assertion after
+    // run() below explicitly fails the test.
     if (path.startsWith('documents?')) {
       // documents has no status/source_document_id/updated_at columns at all
       // (verified live) — omitted here on purpose, not just unselected.
       return [{ id: 'doc-1', document_type: 'DDT', name: 'ddt-scan.pdf', received_at: '2024-01-11T08:00:00Z', confidence: 0.7, needs_review: false, source_email_id: 'se-5', created_at: '2024-01-11T08:00:00Z' }];
     }
     if (path.startsWith('data_source_coverage?')) return [{ source_key: 'email_attachments', label: 'Email attachments', status: 'ok', reliability: 'high', message: null, limitation: null }];
-    if (path.startsWith('system_health_alerts?')) return [];
+    if (path.startsWith('system_health_alerts?')) {
+      // system_health_alerts (view) has no "id" column — only alert_key. One
+      // alert matches this order via metadata.orderId, one does not (must be
+      // excluded), proving both the id-substitution and the match discipline.
+      return [
+        { alert_key: 'operational-linking-coverage', severity: 'warning', title: 'Tracciabilita da completare', message: 'msg', target_view: 'settings', metadata: { linked_count: 41, total_count: 56 } },
+        { alert_key: 'order-test-match', severity: 'critical', title: 'Match test', message: 'msg', target_view: 'orders', metadata: { orderId: 'order-1' } }
+      ];
+    }
     return [];
   };
 
@@ -141,21 +153,46 @@ async function run() {
     }
   }
   // linkedDocuments: real raw columns correctly mapped to the contracted shape
-  assert.strictEqual(out.linkedDocuments.length, 4);
+  // (delivery_note + invoice + document only — quote is never queried, see below)
+  assert.strictEqual(out.linkedDocuments.length, 3);
   const ddt = out.linkedDocuments.find((d) => d.kind === 'delivery_note');
   assert.strictEqual(ddt.number, 'DDT-2024-001', 'delivery_note.number must come from the real ddt_number column');
   assert.strictEqual(ddt.receivedAt, '2024-01-10', 'delivery_note.receivedAt must come from the real delivery_date column');
   const invoice = out.linkedDocuments.find((d) => d.kind === 'invoice');
   assert.strictEqual(invoice.number, 'FT-2024-055', 'invoice.number must come from the real invoice_number column');
   assert.strictEqual(invoice.receivedAt, '2024-01-15', 'invoice.receivedAt must come from the real invoice_date column');
-  const quote = out.linkedDocuments.find((d) => d.kind === 'quote');
-  assert.strictEqual(quote.number, 'PRV-2024-010', 'quote.number must come from the real quote_code column');
-  assert.strictEqual(quote.receivedAt, '2024-01-02T09:00:00Z', 'quote.receivedAt must come from the real updated_at column');
+  assert.ok(!out.linkedDocuments.some((d) => d.kind === 'quote'), 'quote must never appear in linkedDocuments: no proven order-specific relationship exists');
   const doc = out.linkedDocuments.find((d) => d.kind === 'DDT' && d.number === 'ddt-scan.pdf');
   assert.ok(doc, 'generic document must map document_type -> kind and name -> number');
   assert.strictEqual(doc.receivedAt, '2024-01-11T08:00:00Z', 'document.receivedAt must come from the real received_at column, not created_at');
 
+  // anomaliesAndAttention: system_health_alerts has no "id" column, so the
+  // output id must come from alert_key; only the metadata-matching alert
+  // (orderId === this order) may appear, never the non-matching coverage one.
+  assert.strictEqual(out.anomaliesAndAttention.length, 1);
+  assert.strictEqual(out.anomaliesAndAttention[0].id, 'order-test-match', 'anomaly id must be substituted from alert_key, not a nonexistent "id" column');
+  assert.strictEqual(out.anomaliesAndAttention[0].alertKey, 'order-test-match');
+  assert.ok(!out.anomaliesAndAttention.some((a) => a.alertKey === 'operational-linking-coverage'), 'an alert with no order-matching metadata must not be attached to this order');
+
   console.log('PASS: authenticated same-tenant');
+
+  console.log('Test: quotes table is never queried (no proven order-specific relationship)');
+  {
+    assert.ok(!queries.some((q) => q.startsWith('quotes?')), 'quotes must never be queried by this route: quotes has no order_id and no other column deterministically ties it to one order');
+  }
+  console.log('PASS');
+
+  console.log('Test: system_health_alerts query never selects the nonexistent "id" column');
+  {
+    const healthQuery = queries.find((q) => q.startsWith('system_health_alerts?'));
+    assert.ok(healthQuery, 'expected a system_health_alerts query to have been issued');
+    const selectMatch = healthQuery.match(/select=([^&]+)/);
+    assert.ok(selectMatch, 'expected a select= clause for system_health_alerts');
+    const selectedColumns = selectMatch[1].split(',');
+    assert.ok(!selectedColumns.includes('id'), `system_health_alerts has no "id" column: ${healthQuery}`);
+    assert.ok(selectedColumns.includes('alert_key'), `system_health_alerts select must include alert_key: ${healthQuery}`);
+  }
+  console.log('PASS');
 
   console.log('Test: no query in this route uses SQL-style "column as alias" syntax');
   {
@@ -171,12 +208,15 @@ async function run() {
   }
   console.log('PASS');
 
-  console.log('Test: delivery_notes/invoices/quotes/documents queries use only real, verified columns');
+  console.log('Test: delivery_notes/invoices/documents queries use only real, verified columns');
   {
+    // quotes deliberately excluded: it is never queried by this route (see
+    // the "quotes table is never queried" test above) because quotes has no
+    // order_id (or any other column) that deterministically ties it to one
+    // order — verified live against information_schema.columns.
     const REAL_COLUMNS = {
       delivery_notes: new Set(['id', 'ddt_number', 'supplier_id', 'supplier_name', 'order_id', 'order_code', 'project_id', 'project_code', 'delivery_date', 'received_date', 'status', 'confidence', 'needs_review', 'source_email_id', 'source_document_id', 'notes', 'created_at', 'updated_at', 'organization_id', 'confirmed_at', 'confirmed_by', 'contact_id']),
       invoices: new Set(['id', 'invoice_number', 'invoice_type', 'supplier_id', 'supplier_name', 'supplier_vat', 'customer_name', 'order_id', 'order_code', 'project_id', 'project_code', 'invoice_date', 'due_date', 'total_amount', 'currency', 'sdi_identifier', 'xml_payload_hash', 'status', 'confidence', 'needs_review', 'source_email_id', 'source_document_id', 'notes', 'created_at', 'updated_at', 'organization_id', 'contact_id', 'canonical_key', 'match_status', 'match_method', 'match_confidence', 'match_candidates']),
-      quotes: new Set(['id', 'quote_code', 'quote_type', 'supplier_id', 'supplier_name', 'customer_name', 'project_id', 'project_code', 'quote_date', 'valid_until', 'total_amount', 'currency', 'status', 'confidence', 'needs_review', 'source_email_id', 'source_document_id', 'notes', 'created_at', 'updated_at', 'organization_id', 'contact_id', 'canonical_key', 'normalized_reference', 'source_thread_id']),
       documents: new Set(['id', 'name', 'type', 'supplier_id', 'supplier_name', 'order_id', 'linked_order_code', 'confidence', 'received_at', 'source_email_id', 'created_at', 'filename', 'document_type', 'file_hash', 'extracted_text_hash', 'needs_review', 'metadata', 'organization_id', 'contact_id', 'channel'])
     };
     for (const [table, realColumns] of Object.entries(REAL_COLUMNS)) {
