@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { formatDate } from "../utils/dateUtils";
-import { formatNumber } from "../utils/formatters";
 import StatusBadge from "./StatusBadge";
 import Button from "./Button";
 import OrderOperationalView from "./OrderOperationalView";
@@ -36,18 +35,18 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
     (status === "CLOSED" || status === "OVERDUE" || order.status === "Scaduto" || order.needsReview);
 
   const rows = [
-    ["ID ordine", order.orderCode],
-    [terminology.supplierSingular, order.supplierName],
     [terminology.projectSingular, order.projectCode],
-    [terminology.material, order.material],
-    ["Quantita", formatNumber(order.quantity)],
     ["Data ordine", formatDate(order.orderDate)],
     [terminology.dueDate, formatDate(order.dueDate)],
     ["Data richiesta", formatDate(order.requiredDate)]
+    // ID ordine / fornitore / materiale / quantita removed: OrderOperationalView
+    // above already shows these same read-only facts (Riepilogo ordine e
+    // fornitore) with data verified against the live schema — repeating them
+    // here would just duplicate the same numbers with no added value.
     // supplierOrderRef / supplierResponse / reminderCount / aiConfidence removed:
     // these were never populated by the production (Supabase) adapter and always
     // rendered "-". The authoritative values now come from OrderOperationalView
-    // below; keeping both here would show two conflicting "truths" side by side.
+    // above; keeping both here would show two conflicting "truths" side by side.
   ].map(([label, value]) => [label, value === null || value === undefined || value === "" ? "-" : value]);
 
   async function runAction(action, successMessage) {
@@ -91,7 +90,7 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
   const inputStyle = { borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" };
 
   return (
-    <aside className="w-full shrink-0 border-t bg-white xl:w-96 xl:border-l xl:border-t-0" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}>
+    <aside className="w-full shrink-0 border-t bg-white xl:w-[34rem] xl:border-l xl:border-t-0" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}>
       <div className="flex h-14 items-center justify-between border-b px-4" style={{ borderColor: "var(--color-border)" }}>
         <div>
           <div className="text-sm font-semibold">{order.orderCode}</div>
@@ -119,9 +118,7 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
               <div key={label} className="grid grid-cols-[140px_1fr] gap-3 text-sm">
                 <dt style={{ color: "var(--color-text-muted)" }}>{label}</dt>
                 <dd className="font-medium">
-                  {label === terminology.supplierSingular && value !== "-" && onNavigate ? (
-                    <Citation onClick={() => onNavigate("suppliers", { supplierName: value })}>{value}</Citation>
-                  ) : label === terminology.projectSingular && value !== "-" && onNavigate ? (
+                  {label === terminology.projectSingular && value !== "-" && onNavigate ? (
                     <Citation onClick={() => onNavigate("projects", { projectCode: value })}>{value}</Citation>
                   ) : (
                     value

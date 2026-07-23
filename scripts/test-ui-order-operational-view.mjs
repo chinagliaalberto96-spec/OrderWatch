@@ -369,10 +369,12 @@ async function run() {
     }
     console.log('PASS');
 
-    console.log('Test: unresolvedEvidence unavailable -> "Verifica non disponibile"');
+    console.log('Test: unresolvedEvidence unavailable -> grouped into the compact "Verifiche avanzate non disponibili" block, not its own full section');
     {
       const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: baseData }));
-      assert.ok(sectionSlice(html, 'ooview-unresolved').includes('Verifica non disponibile'));
+      assert.ok(!html.includes('id="ooview-unresolved"'), 'an unavailable advanced section must not render its own full <section> anymore');
+      assert.ok(html.includes('Verifiche avanzate non disponibili'), 'unavailable advanced sections must be grouped under one compact heading');
+      assert.ok(html.includes('Evidenza non risolta: verifica non disponibile'), 'the compact block must still name which check is unavailable');
     }
     console.log('PASS');
 
@@ -436,20 +438,150 @@ async function run() {
     }
     console.log('PASS');
 
-    console.log('Test: coverage quiet / incomplete / unwatched remain distinct, never presented as healthy');
+    /* ---------------------------------------------------------------- *
+     * "Scaduto" vs "Livello: ok" contradiction — currentObservedSituation
+     * is a hardcoded backend placeholder ({severity:'ok', label:null,
+     * reasonCodes:[]}) never computed from the order's real status. An
+     * overdue order must never read as generally healthy because of it.
+     * ---------------------------------------------------------------- */
+    console.log('Test: an overdue order is never labelled generally "ok" by the unvalidated severity placeholder');
     {
-      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: baseData }));
-      const coverage = sectionSlice(html, 'ooview-coverage');
-      assert.ok(coverage.includes('available') && coverage.includes('quiet ok'));
-      assert.ok(coverage.includes('partial') && coverage.includes('incomplete'));
-      assert.ok(coverage.includes('Copertura non disponibile'), 'a null coverage entry (unwatched/unavailable) must say so explicitly');
+      const overdueData = {
+        ...baseData,
+        summary: { ...baseData.summary, status: 'Scaduto', daysRemaining: -5 },
+        currentObservedSituation: { severity: 'ok', label: null, reasonCodes: [], asOf: null } // exact backend placeholder shape
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: overdueData }));
+      assert.ok(!html.includes('Livello: ok'), 'must never render the old, misleading "Livello: ok" claim');
+      assert.ok(!/Livello operativo:\s*<strong[^>]*>\s*ok\s*<\/strong>/.test(html), 'severity must never be shown verbatim as "ok" when unvalidated');
+      assert.ok(html.includes('Livello operativo non ancora calcolato'), 'an unvalidated placeholder must read as "not yet computed", never as a health claim');
     }
     console.log('PASS');
 
-    console.log('Test: no send/action/state-mutation controls exist in the operational view');
+    console.log('Test: once the backend actually computes a severity (real label/reasonCodes), it is rendered as-is, not suppressed');
+    {
+      const evaluatedData = {
+        ...baseData,
+        currentObservedSituation: { severity: 'critical', label: 'Ritardo confermato dal fornitore', reasonCodes: ['supplier_delay_confirmed'], asOf: null }
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: evaluatedData }));
+      assert.ok(html.includes('Ritardo confermato dal fornitore'), 'a genuinely evaluated label must be shown');
+      assert.ok(!html.includes('Livello operativo non ancora calcolato'), 'a genuinely evaluated situation must not be shown as unvalidated');
+    }
+    console.log('PASS');
+
+    /* ---------------------------------------------------------------- *
+     * Internal identifiers, safe excerpts, document/kind localization
+     * ---------------------------------------------------------------- */
+    console.log('Test: raw UUIDs (sourceEmailId/sourceDocumentId/entityId) are never rendered in the buyer UI');
+    {
+      const UUID_EMAIL = 'f5555555-0000-4000-8000-000000000050';
+      const UUID_DOC = 'a1111111-0000-4000-8000-000000000099';
+      const UUID_ENTITY = 'b2222222-0000-4000-8000-000000000088';
+      const uuidData = {
+        ...baseData,
+        evidenceReferences: [
+          { ref: 'E1', kind: 'line_source', entityType: 'purchase_order_line', entityId: UUID_ENTITY, sourceEmailId: UUID_EMAIL, sourceDocumentId: null, sourceLineNumber: 2 },
+          { ref: 'E2', kind: 'document', entityId: null, sourceEmailId: null, sourceDocumentId: UUID_DOC, sourceLineNumber: null }
+        ],
+        safeEvidenceExcerpts: [],
+        linkedDocuments: [] // deliberately no match, so both refs stay "internal-only"
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: uuidData }));
+      assert.ok(!html.includes(UUID_EMAIL), 'sourceEmailId UUID must never be rendered');
+      assert.ok(!html.includes(UUID_DOC), 'sourceDocumentId UUID must never be rendered');
+      assert.ok(!html.includes(UUID_ENTITY), 'entityId UUID must never be rendered');
+      assert.ok(html.includes('Fonte interna disponibile'), 'an internal-only source must be labelled, not exposed as a UUID');
+      assert.ok(html.includes('Riga ordine'), 'entityType must be translated to a human label (purchase_order_line -> Riga ordine)');
+      assert.ok(html.includes('Riga 2'), 'a real line number is legitimate, useful information and must still be shown');
+    }
+    console.log('PASS');
+
+    console.log('Test: safeEvidenceExcerpts are never rendered as raw JSON');
+    {
+      const jsonData = {
+        ...baseData,
+        evidenceReferences: [{ ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' }],
+        safeEvidenceExcerpts: [{ ref: 'E1', excerpt: '{"description":"Profilato alluminio","item_code":"AL-40","quantity":12,"unit":"M","required_date":"2026-07-20","due_date":"2026-07-18"}' }]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: jsonData }));
+      assert.ok(!html.includes('{&quot;description&quot;'), 'the raw JSON opening brace/quoted key must never appear, escaped or not');
+      assert.ok(!/\{"description"/.test(html), 'the raw JSON string must never appear verbatim');
+    }
+    console.log('PASS');
+
+    console.log('Test: approved safe-excerpt fields are rendered under their named Italian labels');
+    {
+      const jsonData = {
+        ...baseData,
+        evidenceReferences: [{ ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' }],
+        safeEvidenceExcerpts: [{ ref: 'E1', excerpt: '{"description":"Profilato alluminio","item_code":"AL-40","quantity":12,"unit":"M","required_date":"2026-07-20","due_date":"2026-07-18"}' }]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: jsonData }));
+      for (const label of ['Descrizione', 'Codice articolo', 'Quantità', 'Unità', 'Data richiesta', 'Data prevista']) {
+        assert.ok(html.includes(label), `expected approved field label "${label}" to be rendered`);
+      }
+      assert.ok(html.includes('Profilato alluminio') && html.includes('AL-40') && html.includes('2026-07-20') && html.includes('2026-07-18'));
+    }
+    console.log('PASS');
+
+    console.log('Test: an excerpt that fails to parse (or has no approved fields) renders "Estratto non disponibile", never raw text');
+    {
+      const jsonData = {
+        ...baseData,
+        evidenceReferences: [{ ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' }],
+        safeEvidenceExcerpts: [{ ref: 'E1', excerpt: 'not-valid-json{{{' }]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: jsonData }));
+      assert.ok(html.includes('Estratto non disponibile'));
+      assert.ok(!html.includes('not-valid-json'));
+    }
+    console.log('PASS');
+
+    console.log('Test: linked document kinds are localized to Italian, never a raw "document #" technical prefix');
+    {
+      const docsData = {
+        ...baseData,
+        linkedDocuments: [
+          { id: 'ddt-1', kind: 'delivery_note', number: 'DDT-2026-088', status: 'confirmed', receivedAt: '2026-06-28T10:00:00Z' },
+          { id: 'inv-1', kind: 'invoice', number: 'FT-2026-055', status: null, receivedAt: '2026-06-29T10:00:00Z' },
+          // Real content pulled from an actual email subject line (verified live: hex 49 3a 20 = ASCII "I: ",
+          // an Outlook-Italian "Inoltrato:" forward prefix — not a checkbox/control character). Preserved
+          // verbatim as plain title text, never treated as a UI control or given a technical prefix.
+          { id: 'doc-1', kind: 'document', number: 'I: Confirmación Diseño Pedido 0013545497', status: null, receivedAt: '2026-07-16T09:10:22Z' }
+        ]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: docsData }));
+      assert.ok(html.includes('Bolla di consegna'), 'delivery_note must be localized');
+      assert.ok(html.includes('Fattura'), 'invoice must be localized');
+      assert.ok(!html.includes('document #'), 'the raw "document #" technical prefix must never appear');
+      assert.ok(!/>\s*delivery_note\s*</.test(html), 'the raw technical kind name must never appear as the visible label');
+      assert.ok(!/>\s*invoice\s*</.test(html), 'the raw technical kind name must never appear as the visible label');
+      assert.ok(html.includes('I: Confirmación Diseño Pedido 0013545497'), 'real source content (including its literal "I: " prefix) must be preserved verbatim, not stripped');
+      for (const checkbox of ['☐', '☑', '☒', '✅']) {
+        assert.ok(!html.includes(checkbox), 'no checkbox/control glyph must ever be injected into a document title');
+      }
+    }
+    console.log('PASS');
+
+    console.log('Test: coverage statuses are localized and quiet/incomplete/unwatched remain distinct, never presented as healthy');
     {
       const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: baseData }));
-      assert.ok(!html.includes('<button'), 'OrderOperationalView must remain fully read-only');
+      const coverage = sectionSlice(html, 'ooview-coverage');
+      assert.ok(coverage.includes('Disponibile') && coverage.includes('quiet ok'), 'available -> Disponibile, raw message passed through untouched');
+      assert.ok(coverage.includes('Parziale') && coverage.includes('incomplete'), 'partial -> Parziale, raw message passed through untouched');
+      assert.ok(coverage.includes('Copertura non disponibile'), 'a null coverage entry (unwatched/unavailable) must say so explicitly');
+      assert.ok(!/:\s*available\b/.test(coverage), 'the raw English "available" status must not leak as a label');
+      assert.ok(!/:\s*partial\b/.test(coverage), 'the raw English "partial" status must not leak as a label');
+    }
+    console.log('PASS');
+
+    console.log('Test: coverage section is explicitly labelled as system/source coverage, not order health');
+    {
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: baseData }));
+      const coverage = sectionSlice(html, 'ooview-coverage');
+      assert.ok(coverage.includes('Copertura delle fonti dati'), 'the section must use the source/system-coverage heading');
+      assert.ok(/non certifica|non conferma|non garantisce/.test(coverage), 'the section must explicitly disclaim that source coverage does not certify this order is complete');
     }
     console.log('PASS');
 
@@ -481,6 +613,47 @@ async function run() {
       assert.ok(!html.includes('AI confidence'));
       assert.ok(!html.includes('13974707'));
       assert.ok(!html.includes('Confermato'));
+    }
+    console.log('PASS');
+
+    console.log('Test: order number/supplier/material/quantity are not duplicated below the operational view');
+    {
+      // Part 1: OrderOperationalViewContent itself is the canonical place
+      // these facts are shown, when loaded.
+      const summaryData = {
+        ...baseData,
+        orderNumber: 'PO-1',
+        summary: { ...baseData.summary, material: 'Cartoncino', quantity: 10 },
+        resolvedSupplierOrganization: { legalName: 'ACME Srl' }
+      };
+      const viewHtml = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: summaryData }));
+      assert.ok(viewHtml.includes('PO-1') && viewHtml.includes('ACME Srl') && viewHtml.includes('Cartoncino'), 'the operational view summary must show these facts');
+
+      // Part 2: the plain read-only fact list rendered by OrderDetailPanel
+      // below/around the operational view must not repeat the same labels
+      // (SSR renders no effects here, so OrderOperationalView itself stays
+      // idle/null — this isolates the assertion to OrderDetailPanel's own
+      // markup, which is exactly what must not duplicate the facts above).
+      const order = {
+        id: 'order-1', orderCode: 'PO-1', supplierName: 'ACME Srl', projectCode: 'PRJ-1',
+        material: 'Cartoncino', quantity: 10, orderDate: '2024-01-01', dueDate: '2024-02-01', requiredDate: '2024-02-01'
+      };
+      const terminology = { supplierSingular: 'Fornitore', projectSingular: 'Lavoro', material: 'Materiale', dueDate: 'Scadenza', orderSingular: 'ordine' };
+      const panelHtml = renderToStaticMarkup(h(panel.default, { order, status: 'OPEN', terminology }));
+      assert.ok(!/>ID ordine</.test(panelHtml), '"ID ordine" must not be duplicated below the operational view');
+      assert.ok(!/>Fornitore</.test(panelHtml), 'the supplier row must not be duplicated below the operational view');
+      assert.ok(!/>Materiale</.test(panelHtml), 'the material row must not be duplicated below the operational view');
+      assert.ok(!/>Quantita</.test(panelHtml), 'the quantity row must not be duplicated below the operational view');
+      assert.ok(/>Lavoro</.test(panelHtml), 'project ("Lavoro") is not a duplicate and must remain visible');
+    }
+    console.log('PASS');
+
+    console.log('Test: no action, mutation or navigation control is added inside OrderOperationalView');
+    {
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: baseData }));
+      assert.ok(!html.includes('<button'), 'OrderOperationalView must remain fully read-only');
+      assert.ok(!html.includes('<input'), 'OrderOperationalView must not introduce editable fields');
+      assert.ok(!html.includes('<form'), 'OrderOperationalView must not introduce a form/submission control');
     }
     console.log('PASS');
 

@@ -74,14 +74,12 @@ function SafeValue({ value }) {
 // Implements the required 3-state rule for unresolvedEvidence, ambiguousEvidence,
 // activeCommitments and supersededCommitments: unavailable / evaluated-empty / populated.
 // Never reads `.status` on the array — availability is a separate boolean field.
-function AvailabilityAwareSection({ headingId, title, items, available, renderItem, emptyLabel }) {
+function AvailabilityAwareSection({ headingId, title, items, emptyLabel, renderItem }) {
   const list = Array.isArray(items) ? items : [];
   return (
     <section aria-labelledby={headingId}>
       <h3 id={headingId} className="text-sm font-semibold">{title}</h3>
-      {available === false ? (
-        <p className="mt-2 text-sm text-[color:var(--color-text-muted)]">Verifica non disponibile</p>
-      ) : list.length === 0 ? (
+      {list.length === 0 ? (
         <p className="mt-2 text-sm text-[color:var(--color-text-muted)]">{emptyLabel}</p>
       ) : (
         <ul className="mt-2 space-y-2 text-sm">{list.map(renderItem)}</ul>
@@ -117,6 +115,167 @@ function ProvenanceRefs({ refs, evidenceReferences }) {
   );
 }
 
+// --- Human-facing translation tables -----------------------------------
+// These map internal/technical values to buyer-facing Italian labels. Never
+// used to guess a relationship or invent data — purely presentational.
+
+const DOC_KIND_LABELS = {
+  delivery_note: 'Bolla di consegna',
+  invoice: 'Fattura',
+  quote: 'Preventivo',
+  document: 'Documento'
+};
+
+function humanDocKind(kind) {
+  if (!kind) return 'Documento';
+  return DOC_KIND_LABELS[kind] || kind;
+}
+
+const ENTITY_TYPE_LABELS = {
+  purchase_order_line: 'Riga ordine',
+  quote_line: 'Riga preventivo',
+  delivery_note_line: 'Riga bolla',
+  project_requirement: 'Fabbisogno lavoro',
+  procurement_requirement: 'Fabbisogno acquisto'
+};
+
+function humanEntityType(entityType) {
+  if (!entityType) return 'Origine interna';
+  return ENTITY_TYPE_LABELS[entityType] || entityType;
+}
+
+const COVERAGE_STATUS_LABELS = {
+  available: 'Disponibile',
+  partial: 'Parziale',
+  unavailable: 'Non disponibile',
+  incomplete: 'Incompleta',
+  unwatched: 'Non monitorata',
+  quiet: 'Nessun dato recente'
+};
+
+function humanCoverageStatus(status) {
+  if (!status) return 'Non disponibile';
+  return COVERAGE_STATUS_LABELS[status] || status;
+}
+
+// The exact allowlisted keys the backend's sanitizeObservedValues() may emit
+// (server/routes/order-operational-view.js), in display order.
+const OBSERVED_FIELD_ORDER = ['description', 'item_code', 'quantity', 'unit', 'required_date', 'due_date'];
+const OBSERVED_FIELD_LABELS = {
+  description: 'Descrizione',
+  item_code: 'Codice articolo',
+  quantity: 'Quantità',
+  unit: 'Unità',
+  required_date: 'Data richiesta',
+  due_date: 'Data prevista'
+};
+
+// Parses only the backend-approved safe excerpt shape (a JSON object with a
+// fixed allowlist of primitive fields) and renders named fields. Never uses
+// dangerouslySetInnerHTML — values always go through JSX's default escaping.
+// On any parse failure or empty/unexpected shape, falls back to a plain
+// "not available" message instead of ever showing raw JSON.
+function SafeExcerptFields({ excerpt }) {
+  if (!excerpt || typeof excerpt !== 'string') {
+    return <span className="text-xs text-[color:var(--color-text-muted)]">Estratto non disponibile</span>;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(excerpt);
+  } catch {
+    return <span className="text-xs text-[color:var(--color-text-muted)]">Estratto non disponibile</span>;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return <span className="text-xs text-[color:var(--color-text-muted)]">Estratto non disponibile</span>;
+  }
+  const fields = OBSERVED_FIELD_ORDER.filter((key) => {
+    const v = parsed[key];
+    return v !== undefined && v !== null && v !== '' && (typeof v === 'string' || typeof v === 'number');
+  });
+  if (!fields.length) {
+    return <span className="text-xs text-[color:var(--color-text-muted)]">Estratto non disponibile</span>;
+  }
+  return (
+    <dl className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs">
+      {fields.map((key) => (
+        <React.Fragment key={key}>
+          <dt className="text-[color:var(--color-text-muted)]">{OBSERVED_FIELD_LABELS[key]}</dt>
+          <dd>{String(parsed[key])}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
+  );
+}
+
+// Resolves a compact, human source description for one evidence reference —
+// never the raw sourceEmailId/sourceDocumentId UUID. When the reference
+// matches a known linked document (same email/document id), that document's
+// own kind/number/date is used. Otherwise only the internal entity type is
+// shown, and the UUID is replaced by an explicit "internal source" label.
+function resolveEvidenceSource(evidenceRef, linkedDocuments) {
+  const doc = (linkedDocuments || []).find(
+    (d) => (evidenceRef.sourceEmailId && d.sourceEmailId === evidenceRef.sourceEmailId)
+      || (evidenceRef.sourceDocumentId && d.sourceDocumentId === evidenceRef.sourceDocumentId)
+  );
+  if (doc) {
+    return { title: doc.number || null, kindLabel: humanDocKind(doc.kind), receivedAt: doc.receivedAt || null, isInternal: false };
+  }
+  return { title: null, kindLabel: humanEntityType(evidenceRef.entityType), receivedAt: null, isInternal: true };
+}
+
+function evidenceGroupKey(evidenceRef) {
+  if (evidenceRef.sourceEmailId) return `email:${evidenceRef.sourceEmailId}`;
+  if (evidenceRef.sourceDocumentId) return `doc:${evidenceRef.sourceDocumentId}`;
+  return `ref:${evidenceRef.ref}`;
+}
+
+// Groups citation refs by their underlying source (same email/document) so
+// the buyer sees one compact expandable row per real-world source instead of
+// one large card per citation.
+function buildEvidenceGroups(evidenceReferences, linkedDocuments, safeEvidenceExcerpts) {
+  const groups = new Map();
+  for (const e of evidenceReferences || []) {
+    const key = evidenceGroupKey(e);
+    if (!groups.has(key)) {
+      groups.set(key, { key, source: resolveEvidenceSource(e, linkedDocuments), items: [] });
+    }
+    const excerpt = (safeEvidenceExcerpts || []).find((s) => s.ref === e.ref)?.excerpt || null;
+    groups.get(key).items.push({ ref: e.ref, sourceLineNumber: e.sourceLineNumber || null, excerpt });
+  }
+  return Array.from(groups.values());
+}
+
+function EvidenceGroupRow({ group }) {
+  const refsLabel = group.items.map((it) => it.ref).join(', ');
+  const sourceLabel = group.source.title || group.source.kindLabel;
+  return (
+    <details className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+      <summary className="cursor-pointer text-sm font-medium">
+        <span className="font-semibold">{refsLabel}</span>
+        {' — '}
+        <span>{sourceLabel}</span>
+        {group.source.isInternal && !group.source.title ? (
+          <span className="text-xs text-[color:var(--color-text-muted)]"> (Fonte interna disponibile)</span>
+        ) : null}
+        {group.source.receivedAt ? (
+          <span className="text-xs text-[color:var(--color-text-muted)]"> · {formatDate(group.source.receivedAt)}</span>
+        ) : null}
+      </summary>
+      <div className="mt-2 space-y-2">
+        {group.items.map((it) => (
+          <div key={it.ref} id={evidenceAnchorId(it.ref)} tabIndex={-1} className="border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="text-xs font-semibold">
+              {it.ref}
+              {it.sourceLineNumber ? ` · Riga ${it.sourceLineNumber}` : ''}
+            </div>
+            <SafeExcerptFields excerpt={it.excerpt} />
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function CoverageRow({ label, entry }) {
   if (!entry) {
     return (
@@ -127,10 +286,121 @@ function CoverageRow({ label, entry }) {
   }
   return (
     <div className="mt-1">
-      <span className="font-medium">{label}:</span> {entry.status || 'Non disponibile'}
+      <span className="font-medium">{label}:</span> {humanCoverageStatus(entry.status)}
       {entry.message ? <span className="block text-xs text-[color:var(--color-text-muted)]">{entry.message}</span> : null}
       {entry.limitation ? <span className="block text-xs text-[color:var(--color-text-muted)]">{entry.limitation}</span> : null}
     </div>
+  );
+}
+
+// currentObservedSituation.severity is not yet computed by the backend from
+// the order's real status/alert level — today it is always the literal
+// placeholder { severity: 'ok', label: null, reasonCodes: [] } regardless of
+// whether the order is overdue (verified in
+// server/routes/order-operational-view.js). Rendering that literally as
+// "Livello: ok" would silently contradict the order's own, genuinely
+// computed status badge (src/utils/statusRules.js#getOrderStatus, driven by
+// daysRemaining). Until the backend marks this field as actually evaluated
+// (a non-null label, or a non-empty reasonCodes list), it is presented as
+// not yet available rather than as a false "ok" — never invented here.
+function operationalLevelDisplay(situation) {
+  const label = situation?.label ?? null;
+  const reasonCodes = Array.isArray(situation?.reasonCodes) ? situation.reasonCodes : [];
+  const isPlaceholder = !label && reasonCodes.length === 0;
+  if (isPlaceholder) {
+    return { text: 'Livello operativo non ancora calcolato', muted: true };
+  }
+  return { text: label || situation?.severity || 'Non disponibile', muted: false };
+}
+
+// The four "advanced verification" sections share one contract: an array
+// plus a separate availability boolean (never `.status` on the array). When
+// unavailable, they are grouped into one compact expandable summary instead
+// of four large blocks; once genuinely evaluated (available !== false), each
+// renders as its own section, populated or truthfully empty.
+function AdvancedVerificationSections({ data }) {
+  const defs = [
+    {
+      key: 'unresolved',
+      headingId: 'ooview-unresolved',
+      title: 'Evidenza non risolta',
+      items: data.unresolvedEvidence,
+      available: data.unresolvedEvidenceAvailable,
+      emptyLabel: 'Nessuna evidenza non risolta rilevata.',
+      renderItem: (item, i) => (
+        <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          {item.reason || item.title || 'Elemento non risolto'}
+        </li>
+      )
+    },
+    {
+      key: 'ambiguous',
+      headingId: 'ooview-ambiguous',
+      title: 'Evidenza ambigua',
+      items: data.ambiguousEvidence,
+      available: data.ambiguousEvidenceAvailable,
+      emptyLabel: 'Nessuna evidenza ambigua rilevata.',
+      renderItem: (item, i) => (
+        <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          {item.reason || item.title || 'Elemento ambiguo'}
+        </li>
+      )
+    },
+    {
+      key: 'active-commitments',
+      headingId: 'ooview-active-commitments',
+      title: 'Impegni attivi',
+      items: data.activeCommitments,
+      available: data.activeCommitmentsAvailable,
+      emptyLabel: 'Nessun impegno attivo rilevato.',
+      renderItem: (item, i) => (
+        // Read-only: no action, link or control is attached to a commitment.
+        <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          {item.description || item.kind || 'Impegno attivo'}
+        </li>
+      )
+    },
+    {
+      key: 'superseded-commitments',
+      headingId: 'ooview-superseded-commitments',
+      title: 'Impegni superati',
+      items: data.supersededCommitments,
+      available: data.supersededCommitmentsAvailable,
+      emptyLabel: 'Nessun impegno superato rilevato.',
+      renderItem: (item, i) => (
+        <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          {item.description || item.kind || 'Impegno superato'}
+        </li>
+      )
+    }
+  ];
+
+  const unavailable = defs.filter((s) => s.available === false);
+  const evaluated = defs.filter((s) => s.available !== false);
+
+  return (
+    <>
+      {unavailable.length > 0 && (
+        <details className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          <summary className="cursor-pointer text-sm font-semibold">Verifiche avanzate non disponibili</summary>
+          <ul className="mt-2 space-y-1 text-sm text-[color:var(--color-text-muted)]">
+            {unavailable.map((s) => (
+              <li key={s.key}>{s.title}: verifica non disponibile</li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {evaluated.map((s) => (
+        <AvailabilityAwareSection
+          key={s.key}
+          headingId={s.headingId}
+          title={s.title}
+          items={s.items}
+          emptyLabel={s.emptyLabel}
+          renderItem={s.renderItem}
+        />
+      ))}
+    </>
   );
 }
 
@@ -163,6 +433,9 @@ export function OrderOperationalViewContent({ status, error, data }) {
   const lines = Array.isArray(d.canonicalMaterialLines) ? d.canonicalMaterialLines : [];
   const evidenceReferences = Array.isArray(d.evidenceReferences) ? d.evidenceReferences : [];
   const safeEvidenceExcerpts = Array.isArray(d.safeEvidenceExcerpts) ? d.safeEvidenceExcerpts : [];
+  const linkedDocuments = Array.isArray(d.linkedDocuments) ? d.linkedDocuments : [];
+  const evidenceGroups = buildEvidenceGroups(evidenceReferences, linkedDocuments, safeEvidenceExcerpts);
+  const levelInfo = operationalLevelDisplay(d.currentObservedSituation);
 
   return (
     <div className="space-y-4">
@@ -186,7 +459,9 @@ export function OrderOperationalViewContent({ status, error, data }) {
       <section aria-labelledby="ooview-situation">
         <h3 id="ooview-situation" className="text-sm font-semibold">Situazione attuale</h3>
         <div className="mt-2 text-sm">
-          <div>Livello: <strong><SafeValue value={d.currentObservedSituation?.severity} /></strong></div>
+          <div>
+            Livello operativo: <strong className={levelInfo.muted ? 'font-normal text-[color:var(--color-text-muted)]' : ''}>{levelInfo.text}</strong>
+          </div>
           <div>Aggiornato al: <SafeValue value={d.currentObservedSituation?.asOf ? formatDate(d.currentObservedSituation.asOf) : null} /></div>
         </div>
       </section>
@@ -218,120 +493,79 @@ export function OrderOperationalViewContent({ status, error, data }) {
       <section aria-labelledby="ooview-lines">
         <h3 id="ooview-lines" className="text-sm font-semibold">Righe operative canoniche</h3>
         {lines.length ? (
-          <table className="mt-2 w-full text-sm border-collapse" aria-describedby="ooview-lines">
-            <thead>
-              <tr>
-                <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Descrizione</th>
-                <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Quantita</th>
-                <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Stato</th>
-                <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Provenienza</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((ln) => (
-                <tr key={ln.id}>
-                  <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.description || 'Riga'}</td>
-                  <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.quantity ?? 'Non disponibile'}</td>
-                  <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.status || 'Non disponibile'}</td>
-                  <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
-                    <ProvenanceRefs refs={ln.provenanceRefs} evidenceReferences={evidenceReferences} />
-                  </td>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-sm border-collapse" aria-describedby="ooview-lines">
+              <thead>
+                <tr>
+                  <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Descrizione</th>
+                  <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Quantita</th>
+                  <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Stato</th>
+                  <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Provenienza</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lines.map((ln) => (
+                  <tr key={ln.id}>
+                    <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.description || 'Riga'}</td>
+                    <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.quantity ?? 'Non disponibile'}</td>
+                    <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.status || 'Non disponibile'}</td>
+                    <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                      <ProvenanceRefs refs={ln.provenanceRefs} evidenceReferences={evidenceReferences} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <div className="mt-2 text-sm text-[color:var(--color-text-muted)]">Sezione non valutata o vuota</div>
         )}
       </section>
 
       <section aria-labelledby="ooview-evidence">
-        <h3 id="ooview-evidence" className="text-sm font-semibold">Evidenza e documenti collegati</h3>
-        <div className="mt-2 text-sm space-y-2">
-          <ul className="mt-1 space-y-2" aria-label="Riferimenti evidenza">
-            {evidenceReferences.map((e) => (
-              <li key={e.ref} id={evidenceAnchorId(e.ref)} tabIndex={-1} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="font-semibold">{e.ref}</div>
-                <div className="text-xs">{e.kind}</div>
-                <div className="text-xs">Email di origine: {e.sourceEmailId || 'Non disponibile'}</div>
-                <div className="text-xs">Documento di origine: {e.sourceDocumentId || 'Non disponibile'}</div>
-                <div className="text-xs">Estratto: {safeEvidenceExcerpts.find((s) => s.ref === e.ref)?.excerpt || 'Non disponibile'}</div>
+        <h3 id="ooview-evidence" className="text-sm font-semibold">Evidenza</h3>
+        {evidenceGroups.length ? (
+          <div className="mt-2 space-y-2">
+            {evidenceGroups.map((g) => <EvidenceGroupRow key={g.key} group={g} />)}
+          </div>
+        ) : (
+          <div className="mt-2 text-sm text-[color:var(--color-text-muted)]">Nessuna evidenza disponibile</div>
+        )}
+      </section>
+
+      <section aria-labelledby="ooview-documents">
+        <h3 id="ooview-documents" className="text-sm font-semibold">Documenti collegati</h3>
+        {linkedDocuments.length ? (
+          <ul className="mt-2 space-y-2 text-sm" aria-label="Documenti collegati">
+            {linkedDocuments.map((doc) => (
+              <li key={doc.id} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--color-text-muted)]">{humanDocKind(doc.kind)}</div>
+                {/* doc.number is real source content (e.g. an email subject) and is
+                    rendered verbatim as plain text — never prefixed with a technical
+                    marker like "document #" that could be mistaken for a UI control. */}
+                <div className="font-medium">{doc.number || 'Senza riferimento'}</div>
+                <div className="text-xs text-[color:var(--color-text-muted)]">
+                  {doc.receivedAt ? formatDate(doc.receivedAt) : 'Data non disponibile'}
+                  {doc.status ? ` · ${doc.status}` : ''}
+                </div>
               </li>
             ))}
           </ul>
-
-          <div>
-            <div className="text-xs text-[color:var(--color-text-muted)]">Documenti collegati</div>
-            <ul className="mt-1 space-y-2" aria-label="Documenti collegati">
-              {(d.linkedDocuments || []).map((doc) => (
-                <li key={doc.id} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="font-medium">{doc.kind} {doc.number ? `#${doc.number}` : ''}</div>
-                  <div className="text-xs text-[color:var(--color-text-muted)]">Ricevuto: {doc.receivedAt ? formatDate(doc.receivedAt) : 'Non disponibile'}</div>
-                  <div className="text-xs">Stato: {doc.status || 'Non disponibile'}</div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        ) : (
+          <div className="mt-2 text-sm text-[color:var(--color-text-muted)]">Nessun documento collegato</div>
+        )}
       </section>
 
-      <AvailabilityAwareSection
-        headingId="ooview-unresolved"
-        title="Evidenza non risolta"
-        items={d.unresolvedEvidence}
-        available={d.unresolvedEvidenceAvailable}
-        emptyLabel="Nessuna evidenza non risolta rilevata."
-        renderItem={(item, i) => (
-          <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-            {item.reason || item.title || JSON.stringify(item)}
-          </li>
-        )}
-      />
-
-      <AvailabilityAwareSection
-        headingId="ooview-ambiguous"
-        title="Evidenza ambigua"
-        items={d.ambiguousEvidence}
-        available={d.ambiguousEvidenceAvailable}
-        emptyLabel="Nessuna evidenza ambigua rilevata."
-        renderItem={(item, i) => (
-          <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-            {item.reason || item.title || JSON.stringify(item)}
-          </li>
-        )}
-      />
-
-      <AvailabilityAwareSection
-        headingId="ooview-active-commitments"
-        title="Impegni attivi"
-        items={d.activeCommitments}
-        available={d.activeCommitmentsAvailable}
-        emptyLabel="Nessun impegno attivo rilevato."
-        renderItem={(item, i) => (
-          // Read-only: no action, link or control is attached to a commitment.
-          <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-            {item.description || item.kind || JSON.stringify(item)}
-          </li>
-        )}
-      />
-
-      <AvailabilityAwareSection
-        headingId="ooview-superseded-commitments"
-        title="Impegni superati"
-        items={d.supersededCommitments}
-        available={d.supersededCommitmentsAvailable}
-        emptyLabel="Nessun impegno superato rilevato."
-        renderItem={(item, i) => (
-          <li key={item.id || i} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
-            {item.description || item.kind || JSON.stringify(item)}
-          </li>
-        )}
-      />
+      <AdvancedVerificationSections data={d} />
 
       <section aria-labelledby="ooview-coverage">
-        <h3 id="ooview-coverage" className="text-sm font-semibold">Copertura e sincronizzazione</h3>
+        <h3 id="ooview-coverage" className="text-sm font-semibold">Copertura delle fonti dati</h3>
+        <p className="mt-1 text-xs text-[color:var(--color-text-muted)]">
+          Indica quanto sono osservabili le fonti (email, allegati, collegamento operativo) a livello di sistema — non certifica che questo singolo ordine sia completo o corretto.
+        </p>
         <div className="mt-2 text-sm">
           <CoverageRow label="Email in entrata" entry={d.coverageAndSyncHealth?.inboundEmail} />
+          <CoverageRow label="Email in uscita" entry={d.coverageAndSyncHealth?.outboundEmail} />
           <CoverageRow label="Allegati" entry={d.coverageAndSyncHealth?.attachments} />
           <CoverageRow label="Collegamento operativo" entry={d.coverageAndSyncHealth?.operationalLinking} />
         </div>
