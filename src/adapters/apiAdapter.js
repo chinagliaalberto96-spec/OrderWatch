@@ -48,6 +48,11 @@ export function createApiAdapter(dataSource, { getAccessToken } = {}) {
       return parseOrThrow(response, "Altera API");
     },
 
+    async getOrderOperationalView(orderId) {
+      const response = await apiFetch(`/api/order-operational-view?orderId=${encodeURIComponent(orderId)}`);
+      return parseOrThrow(response, "Order operational view API");
+    },
+
     async askAltera(question, conversationId = null) {
       const response = await apiFetch("/api/altera", {
         method: "POST",
