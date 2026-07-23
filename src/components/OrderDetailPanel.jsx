@@ -9,7 +9,7 @@ import OrderOperationalView from "./OrderOperationalView";
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
 const BUYER_STATUSES = ["In attesa", "Confermato", "Ricevuto", "Annullato"];
 
-export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder, onNavigate }) {
+export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -106,9 +106,11 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
       <div className="space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-124px)]">
         <StatusBadge status={status} />
 
-        {/* Operational view integration */}
+        {/* Operational view integration. fetchOperationalView is the same
+            authenticated `adapter` instance as onUpdateOrder/onDeleteOrder
+            above (threaded from App.jsx), not a separate/unauthenticated one. */}
         <div className="mt-3">
-          <OrderOperationalView orderId={order?.id} />
+          <OrderOperationalView orderId={order?.id} fetchOperationalView={onFetchOrderOperationalView} />
         </div>
 
         {!editing && (

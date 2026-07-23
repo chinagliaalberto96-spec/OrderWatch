@@ -1,5 +1,4 @@
 import React, { useEffect, useReducer, useRef } from 'react';
-import { apiAdapter as defaultApi } from '../adapters/apiAdapter.js';
 import { formatDate } from '../utils/dateUtils';
 
 /* ============================================================
@@ -38,9 +37,15 @@ export function isNotFoundError(err) {
 
 // Real fetch orchestration used by the component's effect. Extracted so it
 // can be exercised directly, in plain Node, without mounting a DOM.
-export async function loadOrderOperationalView({ orderId, api, signal, dispatch, tokenRef, myToken }) {
+//
+// `fetchFn` must be the app's shared authenticated request path — the same
+// bound `adapter.getOrderOperationalView` used everywhere else (threaded down
+// from App.jsx via the `fetchOperationalView` prop) — never a locally
+// re-created client. It is called exactly as apiAdapter.js defines it:
+// fetchFn(orderId, { signal }).
+export async function loadOrderOperationalView({ orderId, fetchFn, signal, dispatch, tokenRef, myToken }) {
   try {
-    const data = await api.getOrderOperationalView(orderId, { signal });
+    const data = await fetchFn(orderId, { signal });
     // Stale-response protection: a newer load (or unmount) may have started
     // while this request was in flight.
     if (tokenRef.current !== myToken) return;
@@ -340,8 +345,12 @@ export function OrderOperationalViewContent({ status, error, data }) {
  * the presentational component. No presentation logic lives here.
  * ============================================================ */
 
-export default function OrderOperationalView({ orderId, apiAdapterOverride }) {
-  const api = apiAdapterOverride || defaultApi;
+// `fetchOperationalView` is the real prop, threaded from App.jsx's
+// authenticated `adapter` through OrdersView -> OrderDetailPanel (the same
+// path onUpdateOrder/onDeleteOrder already use). `fetchOverride` exists only
+// for tests, so they can inject a fake without touching the production path.
+export default function OrderOperationalView({ orderId, fetchOperationalView, fetchOverride }) {
+  const fetchFn = fetchOverride || fetchOperationalView;
   const [state, dispatch] = useReducer(orderOperationalViewReducer, initialOrderOperationalViewState);
   const tokenRef = useRef(0);
 
@@ -350,10 +359,16 @@ export default function OrderOperationalView({ orderId, apiAdapterOverride }) {
       dispatch({ type: 'RESET' });
       return undefined;
     }
+    if (typeof fetchFn !== 'function') {
+      // Fail loud instead of silently falling back to an unauthenticated
+      // client — that fallback is exactly what caused the original 401 bug.
+      dispatch({ type: 'LOAD_ERROR', message: 'Vista operativa non disponibile: configurazione mancante.' });
+      return undefined;
+    }
     const myToken = ++tokenRef.current;
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     dispatch({ type: 'LOAD_START' });
-    loadOrderOperationalView({ orderId, api, signal: controller?.signal, dispatch, tokenRef, myToken });
+    loadOrderOperationalView({ orderId, fetchFn, signal: controller?.signal, dispatch, tokenRef, myToken });
     return () => {
       // Invalidates this load for the staleness check in loadOrderOperationalView
       // (covers both "a new order was selected" and "the component unmounted"),
@@ -361,7 +376,7 @@ export default function OrderOperationalView({ orderId, apiAdapterOverride }) {
       tokenRef.current++;
       controller?.abort();
     };
-  }, [orderId, api]);
+  }, [orderId, fetchFn]);
 
   if (!orderId) return null;
   return <OrderOperationalViewContent status={state.status} error={state.error} data={state.data} />;

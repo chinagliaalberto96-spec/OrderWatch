@@ -15,6 +15,7 @@
 //  - OrderDetailPanel's removal of the four legacy fields
 
 import assert from 'assert';
+import { readFile } from 'fs/promises';
 import { createServer } from 'vite';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement as h } from 'react';
@@ -26,7 +27,22 @@ async function loadRealModules() {
   });
   const view = await server.ssrLoadModule('/src/components/OrderOperationalView.jsx');
   const panel = await server.ssrLoadModule('/src/components/OrderDetailPanel.jsx');
-  return { server, view, panel };
+  const adapter = await server.ssrLoadModule('/src/adapters/apiAdapter.js');
+  return { server, view, panel, adapter };
+}
+
+// Captures the last fetch() call so tests can inspect exactly what the real
+// createApiAdapter/apiFetch sent, without any network access.
+function withMockedFetch(responseFactory, run) {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return responseFactory(url, options);
+  };
+  return Promise.resolve(run(calls)).finally(() => {
+    globalThis.fetch = original;
+  });
 }
 
 function sectionSlice(html, id) {
@@ -37,7 +53,7 @@ function sectionSlice(html, id) {
 }
 
 async function run() {
-  const { server, view, panel } = await loadRealModules();
+  const { server, view, panel, adapter } = await loadRealModules();
   const {
     orderOperationalViewReducer,
     initialOrderOperationalViewState,
@@ -45,8 +61,115 @@ async function run() {
     loadOrderOperationalView,
     OrderOperationalViewContent
   } = view;
+  const { createApiAdapter } = adapter;
 
   try {
+    /* ---------------------------------------------------------------- *
+     * Authentication propagation — real createApiAdapter/apiFetch code,
+     * the exact same shared helper every other protected call uses.
+     * ---------------------------------------------------------------- */
+    console.log('Test: getOrderOperationalView uses the shared authenticated request path (Authorization forwarded)');
+    {
+      const FAKE_TOKEN = 'session-token-abc123';
+      const api = createApiAdapter(undefined, { getAccessToken: async () => FAKE_TOKEN });
+      await withMockedFetch(
+        () => ({ ok: true, json: async () => ({ orderId: 'order-1' }) }),
+        async (calls) => {
+          await api.getOrderOperationalView('order-1');
+          assert.strictEqual(calls.length, 1);
+          assert.strictEqual(calls[0].url, '/api/order-operational-view?orderId=order-1');
+          assert.strictEqual(calls[0].options.headers.Authorization, `Bearer ${FAKE_TOKEN}`);
+        }
+      );
+    }
+    console.log('PASS');
+
+    console.log('Test: AbortSignal is forwarded to the underlying fetch');
+    {
+      const api = createApiAdapter(undefined, { getAccessToken: async () => 'tok' });
+      const controller = new AbortController();
+      await withMockedFetch(
+        () => ({ ok: true, json: async () => ({}) }),
+        async (calls) => {
+          await api.getOrderOperationalView('order-1', { signal: controller.signal });
+          assert.strictEqual(calls[0].options.signal, controller.signal);
+        }
+      );
+    }
+    console.log('PASS');
+
+    console.log('Test: HTTP 401 from the real endpoint surfaces as error.status === 401');
+    {
+      const api = createApiAdapter(undefined, { getAccessToken: async () => 'expired-or-missing-session' });
+      await withMockedFetch(
+        () => ({ ok: false, status: 401, json: async () => ({ error: 'Sessione mancante. Accedi nuovamente.' }) }),
+        async () => {
+          let thrown = null;
+          try {
+            await api.getOrderOperationalView('order-1');
+          } catch (e) {
+            thrown = e;
+          }
+          assert.ok(thrown, 'a 401 response must throw');
+          assert.strictEqual(thrown.status, 401);
+        }
+      );
+    }
+    console.log('PASS');
+
+    console.log('Test: no token/credential leaks into the rendered error UI or console logs');
+    {
+      const SECRET_TOKEN = 'do-not-leak-this-token-xyz';
+      const api = createApiAdapter(undefined, { getAccessToken: async () => SECRET_TOKEN });
+      const consoleCalls = [];
+      const originalLog = console.log;
+      const originalError = console.error;
+      const originalWarn = console.warn;
+      console.log = (...args) => consoleCalls.push(args.join(' '));
+      console.error = (...args) => consoleCalls.push(args.join(' '));
+      console.warn = (...args) => consoleCalls.push(args.join(' '));
+      try {
+        await withMockedFetch(
+          () => ({ ok: false, status: 401, json: async () => ({ error: 'Sessione mancante. Accedi nuovamente.' }) }),
+          async () => {
+            let dispatched;
+            const dispatch = (a) => { dispatched = a; };
+            await loadOrderOperationalView({
+              orderId: 'order-1',
+              fetchFn: (orderId, opts) => api.getOrderOperationalView(orderId, opts),
+              dispatch,
+              tokenRef: { current: 1 },
+              myToken: 1
+            });
+            assert.strictEqual(dispatched.type, 'LOAD_ERROR');
+            assert.ok(!dispatched.message.includes(SECRET_TOKEN), 'dispatched error message must not contain the token');
+            const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'error', error: dispatched.message, data: null }));
+            assert.ok(!html.includes(SECRET_TOKEN), 'rendered error UI must not contain the token');
+          }
+        );
+      } finally {
+        console.log = originalLog;
+        console.error = originalError;
+        console.warn = originalWarn;
+      }
+      assert.ok(!consoleCalls.some((line) => line.includes(SECRET_TOKEN)), 'no console output must contain the token');
+    }
+    console.log('PASS');
+
+    console.log('Test: OrderDetailPanel wires the real shared adapter method, not a separate/unauthenticated one');
+    {
+      // Regression guard for the exact bug that shipped: OrderOperationalView.jsx
+      // must not import the bare `apiAdapter` singleton (no getAccessToken) and
+      // OrderDetailPanel must forward the authenticated prop through.
+      const viewSource = await readFile(new URL('../src/components/OrderOperationalView.jsx', import.meta.url), 'utf8');
+      assert.ok(!viewSource.includes("import { apiAdapter"), 'OrderOperationalView must not import the unauthenticated singleton adapter');
+      assert.ok(viewSource.includes('fetchOperationalView'), 'OrderOperationalView must accept the authenticated fetch function as a prop');
+
+      const panelSource = await readFile(new URL('../src/components/OrderDetailPanel.jsx', import.meta.url), 'utf8');
+      assert.ok(panelSource.includes('fetchOperationalView={onFetchOrderOperationalView}'), 'OrderDetailPanel must forward the authenticated handler, not construct its own client');
+    }
+    console.log('PASS');
+
     /* ---------------------------------------------------------------- *
      * 1. Pure reducer — real state machine, no DOM needed
      * ---------------------------------------------------------------- */
@@ -75,8 +198,8 @@ async function run() {
       const dispatch = (action) => dispatched.push(action);
       const tokenRef = { current: 1 };
       let resolveFirst;
-      const firstApi = { getOrderOperationalView: () => new Promise((resolve) => { resolveFirst = resolve; }) };
-      const firstLoad = loadOrderOperationalView({ orderId: 'order-1', api: firstApi, dispatch, tokenRef, myToken: 1 });
+      const firstFetch = () => new Promise((resolve) => { resolveFirst = resolve; });
+      const firstLoad = loadOrderOperationalView({ orderId: 'order-1', fetchFn: firstFetch, dispatch, tokenRef, myToken: 1 });
       // A newer order is selected before the first request resolves.
       tokenRef.current = 2;
       resolveFirst({ orderId: 'order-1', stale: true });
@@ -92,8 +215,8 @@ async function run() {
       const tokenRef = { current: 1 };
       const abortErr = new Error('aborted');
       abortErr.name = 'AbortError';
-      const api = { getOrderOperationalView: () => Promise.reject(abortErr) };
-      await loadOrderOperationalView({ orderId: 'order-1', api, dispatch, tokenRef, myToken: 1 });
+      const fetchFn = () => Promise.reject(abortErr);
+      await loadOrderOperationalView({ orderId: 'order-1', fetchFn, dispatch, tokenRef, myToken: 1 });
       assert.strictEqual(dispatched.length, 0, 'an AbortError must never reach LOAD_ERROR');
     }
     console.log('PASS');
@@ -103,8 +226,8 @@ async function run() {
       const dispatched = [];
       const dispatch = (action) => dispatched.push(action);
       const tokenRef = { current: 2 }; // unmount already bumped the token
-      const api = { getOrderOperationalView: () => Promise.reject(new Error('network down')) };
-      await loadOrderOperationalView({ orderId: 'order-1', api, dispatch, tokenRef, myToken: 1 });
+      const fetchFn = () => Promise.reject(new Error('network down'));
+      await loadOrderOperationalView({ orderId: 'order-1', fetchFn, dispatch, tokenRef, myToken: 1 });
       assert.strictEqual(dispatched.length, 0);
     }
     console.log('PASS');
@@ -116,12 +239,12 @@ async function run() {
       const tokenRef = { current: 1 };
       const notFoundErr = new Error('Order not found');
       notFoundErr.status = 404;
-      await loadOrderOperationalView({ orderId: 'order-1', api: { getOrderOperationalView: () => Promise.reject(notFoundErr) }, dispatch, tokenRef, myToken: 1 });
+      await loadOrderOperationalView({ orderId: 'order-1', fetchFn: () => Promise.reject(notFoundErr), dispatch, tokenRef, myToken: 1 });
       assert.strictEqual(dispatched.type, 'LOAD_NOT_FOUND');
 
       const genericErr = new Error('Server exploded');
       genericErr.status = 500;
-      await loadOrderOperationalView({ orderId: 'order-1', api: { getOrderOperationalView: () => Promise.reject(genericErr) }, dispatch, tokenRef, myToken: 1 });
+      await loadOrderOperationalView({ orderId: 'order-1', fetchFn: () => Promise.reject(genericErr), dispatch, tokenRef, myToken: 1 });
       assert.strictEqual(dispatched.type, 'LOAD_ERROR');
       assert.strictEqual(dispatched.message, 'Server exploded');
     }

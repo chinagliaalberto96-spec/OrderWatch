@@ -124,6 +124,17 @@ export default function App() {
     []
   );
 
+  // Same authenticated `adapter` instance as every other protected call
+  // (handleUpdateOrder, handleDeleteOrder, ...). Unlike those, this one is
+  // consumed inside a child useEffect dependency array (OrderOperationalView),
+  // so it must stay referentially stable across unrelated App re-renders —
+  // otherwise the child would re-fetch on every render, not just on order
+  // change. `adapter` itself is stable ([] deps above), so this is stable too.
+  const handleFetchOrderOperationalView = useCallback(
+    (orderId, options) => adapter.getOrderOperationalView(orderId, options),
+    [adapter]
+  );
+
   useEffect(() => {
     if (AUTH_MODE !== "supabase") return undefined;
 
@@ -719,6 +730,7 @@ export default function App() {
               onClearFilter={() => setDrilldown({})}
               onUpdateOrder={handleUpdateOrder}
               onDeleteOrder={handleDeleteOrder}
+              onFetchOrderOperationalView={handleFetchOrderOperationalView}
               materialLines={filteredData.materialLines || []}
               materialLineRevisions={data.materialLineRevisions || []}
               pendingDeliveryNotesCount={(data.deliveryNotes || []).filter((note) => note.needsReview).length}
