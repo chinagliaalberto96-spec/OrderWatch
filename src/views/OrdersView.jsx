@@ -16,7 +16,7 @@ import { canPrepareSupplierOrderFromLine, isProcurementRequirement } from "../ut
 // richieste" quando si arriva qui dal KPI della dashboard.
 const ACTION_STATUSES = ["OVERDUE", "CRITICAL", "TO_VERIFY"];
 
-export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onNavigate, onPrepareSupplierOrder }) {
+export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate, onPrepareSupplierOrder }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   // Dopo un refresh dei dati (es. update dal pannello) l'ordine selezionato
@@ -181,6 +181,7 @@ export default function OrdersView({ config, orders, materialLines = [], pending
         onClose={() => setSelectedOrder(null)}
         onUpdateOrder={onUpdateOrder}
         onDeleteOrder={onDeleteOrder}
+        onFetchOrderOperationalView={onFetchOrderOperationalView}
         onNavigate={onNavigate}
       />
     </div>

@@ -53,7 +53,7 @@ Everything in this table was verified by reading the code/schema, not inferred f
 | Contacts (org + person) | `contacts`, `contact_emails`, `contact_aliases` | tables | yes | `lib/contact-registry.js` (write), nothing in the UI surfaces `contacts.verification_status`/`trusted` on an order |
 | Delivery notes + lines | `delivery_notes`, `delivery_note_lines`, `receipt_allocations` | tables | yes | `server/routes/receiving.js` (live, joined server-side, **strips `source_email_id`** before returning) |
 | Invoices | `invoices`, `invoice_sources` | tables | yes | not exposed via any Graphic Center Group route found; only via bulk `api/dashboard.js` list |
-| Quotes | `quotes`, `quote_lines` | tables | yes | `server/routes/supplier-orders.js` (converts on order creation) |
+| Quotes | `quotes`, `quote_lines` | tables | yes | `server/routes/supplier-orders.js` (converts on order creation) — **no `order_id` column, no deterministic order relationship; see §3.9** |
 | Outbound commitments | computed by `lib/outbound-operational-facts.js`, called live from `worker/outbound-email-processor.js` | **computed, not a table** — persisted only inside `activities.metadata` (JSONB), never as first-class columns | yes (`organization_id` on `activities`) | nothing reads `activities.metadata.commitments` back structurally today |
 | Active vs. superseded commitment resolution | `consolidateCommitments()` in `lib/outbound-operational-facts.js` | pure function | n/a | **only called from `scripts/simulate-mbox-operational-window.js`** (an offline analysis script) — never invoked in the live worker |
 | Coverage per source category | `data_source_coverage` | **DB view** (mailbox/email/document/linking stats aggregated live) | yes | `server/routes/altera.js` (live, read-only context) |
@@ -135,14 +135,18 @@ Everything in this table was verified by reading the code/schema, not inferred f
 - **UI today:** no — `OrderDetailPanel` shows one flattened `material`/`quantity` string instead of this array (confirmed by code read).
 
 ### 3.9 `linkedDocuments`
-- **Type:** `Array<{ id, kind: 'delivery_note'|'invoice'|'quote'|'document', number, status, receivedAt, confidence, needsReview }>`
-- **Source:** `delivery_notes`, `invoices`, `quotes`, `documents` filtered by `order_id = :orderId` (all four tables have this column).
+- **Type:** `Array<{ id, kind: 'delivery_note'|'invoice'|'quote'|'document', number, status, receivedAt, confidence, needsReview }>`. `'quote'` remains part of the shape for a future version where a real relationship exists (see below), but is never emitted today.
+- **Source (corrected — see Gap Map / implementation history):** `delivery_notes`, `invoices`, `documents`, filtered by `order_id = :orderId`. **`quotes` is not queried.** The original version of this section stated that all four tables share an `order_id` column filterable this way; that was never true and was only discovered live, in production, as a `PostgreSQL 42703: column quotes.order_id does not exist` error — `quotes` has no `order_id` (or `order_code`) column at all, verified against `information_schema.columns`.
+  - `delivery_notes.order_id`, `invoices.order_id`, `documents.order_id` are real, tenant-scoped (`organization_id`-filtered) foreign keys to `orders.id` — verified live against `information_schema.table_constraints`. These three may be linked to a specific order safely and deterministically.
+  - `quotes` currently has **no deterministic relationship to a specific order** anywhere in the schema. Its only relational column toward the order's context is `project_id` (→ `projects.id`), and `project_id` is **insufficient** for this field: a project can contain many orders and many quotes, so filtering quotes by the order's `project_id` would attach every quote in the project to this one order, not just the quote(s) that actually produced it — i.e. it would misrepresent project-wide (effectively organization-wide, from this order's point of view) quotes as order-linked documents.
+  - The only place the codebase currently associates a quote with an order is `server/routes/supplier-orders.js#markQuoteConverted`, which — when a buyer manually converts a quote into a purchase order — writes a **free-text note** onto `quotes.notes` (e.g. "Convertito manualmente dal buyer nell'ordine PO-1234.") and sets `quotes.status = 'converted'`. This is a human-readable audit trail, not a structured, queryable foreign key, and **must not be parsed or treated as an authoritative relationship** — no inferred or free-text-derived link may be presented to the buyer as a verified order↔quote relationship. `canonical_operational_lines` was also checked as a possible per-row join path (it carries both `order_id` and `quote_id` columns): live data confirms `quote_line` rows never carry `order_id` and `purchase_order_line` rows never carry `quote_id` (0 rows with both, across the current dataset), so no row-level join exists there either.
+  - **Until a real, structured order↔quote relationship is introduced** (e.g. a dedicated `quote_id` column populated on the resulting `orders`/`purchase_order_lines` row at conversion time), quotes **must remain omitted** from `linkedDocuments` — never approximated via `project_id`, `quote_code` matching, or the free-text conversion note. This matches the general contract rule (§0 non-goals / evidence discipline): an unproven relationship is represented as *absent*, not as a guess.
 - **Transformation:** union + normalize into one shape.
 - **Authority:** per-row from each table's own `confidence`/`needs_review`/`status`.
-- **Null:** empty array valid.
-- **Evidence:** each entry carries `source_email_id`/`source_document_id` (present on all four tables) — **must be included here**, unlike `server/routes/receiving.js` which currently strips it before returning to the client (confirmed gap).
-- **API today:** partially — `receiving.js` does this join for delivery notes only, and only within the Receiving view, not per-order.
-- **UI today:** no.
+- **Null:** empty array valid — including the case where an order legitimately has delivery notes/invoices/documents but no representable quotes; this is "quotes unavailable for this relationship", not "no quotes exist".
+- **Evidence:** each entry carries `source_email_id`/`source_document_id` (present on all three queried tables) — **must be included here**, unlike `server/routes/receiving.js` which currently strips it before returning to the client (confirmed gap).
+- **API today:** implemented in `server/routes/order-operational-view.js` for `delivery_notes`/`invoices`/`documents` only, per-order, tenant-scoped; `receiving.js` separately does a delivery-notes-only join within the Receiving view, not per-order.
+- **UI today:** yes — `OrderOperationalView.jsx` renders this array; it will never contain a `'quote'` entry until the relationship above is resolved.
 
 ### 3.10 `activeCommitments` / 3.11 `supersededCommitments`
 - **Type:** `Array<{ kind, date, datePrecision, scope, description, explicit, confidence, observedAt, sourceMessageId }>` (identical shape, split by `status`)
@@ -269,9 +273,9 @@ All values below are invented for illustration; no real tenant/order data is rep
   "linkedDocuments": [
     {
       "id": "e3333333-0000-4000-8000-000000000030",
-      "kind": "quote",
-      "number": "PRV-2026-088",
-      "status": "converted",
+      "kind": "delivery_note",
+      "number": "DDT-2026-088",
+      "status": "confirmed",
       "receivedAt": "2026-06-28T10:00:00Z",
       "confidence": 0.97,
       "needsReview": false
@@ -303,10 +307,10 @@ All values below are invented for illustration; no real tenant/order data is rep
   "confidence": 0.82,
   "reasonCodes": ["order_overdue"],
   "evidenceReferences": [
-    { "ref": "E1", "kind": "quote", "sourceEmailId": "f5555555-0000-4000-8000-000000000050", "sourceDocumentId": null, "sourceLineNumber": null }
+    { "ref": "E1", "kind": "delivery_note", "sourceEmailId": "f5555555-0000-4000-8000-000000000050", "sourceDocumentId": null, "sourceLineNumber": null }
   ],
   "safeEvidenceExcerpts": [
-    { "ref": "E1", "excerpt": "Preventivo PRV-2026-088, 120 M profilato alluminio 40x40, consegna 18/07." }
+    { "ref": "E1", "excerpt": "DDT-2026-088, 120 M profilato alluminio 40x40, consegna 18/07." }
   ],
   "proposedActions": []
 }

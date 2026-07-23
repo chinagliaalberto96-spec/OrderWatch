@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { formatDate } from "../utils/dateUtils";
-import { formatNumber, formatPercent } from "../utils/formatters";
 import StatusBadge from "./StatusBadge";
 import Button from "./Button";
+import OrderOperationalView from "./OrderOperationalView";
 
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
 const BUYER_STATUSES = ["In attesa", "Confermato", "Ricevuto", "Annullato"];
 
-export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder, onNavigate }) {
+export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -35,20 +35,18 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
     (status === "CLOSED" || status === "OVERDUE" || order.status === "Scaduto" || order.needsReview);
 
   const rows = [
-    ["ID ordine", order.orderCode],
-    [terminology.supplierSingular, order.supplierName],
     [terminology.projectSingular, order.projectCode],
-    [terminology.material, order.material],
-    ["Quantita", formatNumber(order.quantity)],
     ["Data ordine", formatDate(order.orderDate)],
     [terminology.dueDate, formatDate(order.dueDate)],
-    ["Data richiesta", formatDate(order.requiredDate)],
-    // Numero ordine assegnato dal fornitore (es. 13974707 Fedrigoni, 399863 Sunclear),
-    // utile per riscontro rapido durante un sollecito telefonico o via email.
-    ...(order.supplierOrderRef ? [["Rif. fornitore", order.supplierOrderRef]] : []),
-    ["Risposta fornitore", order.supplierResponse || "-"],
-    ["Solleciti", order.reminderCount ?? "-"],
-    ["AI confidence", formatPercent(order.aiConfidence)]
+    ["Data richiesta", formatDate(order.requiredDate)]
+    // ID ordine / fornitore / materiale / quantita removed: OrderOperationalView
+    // above already shows these same read-only facts (Riepilogo ordine e
+    // fornitore) with data verified against the live schema — repeating them
+    // here would just duplicate the same numbers with no added value.
+    // supplierOrderRef / supplierResponse / reminderCount / aiConfidence removed:
+    // these were never populated by the production (Supabase) adapter and always
+    // rendered "-". The authoritative values now come from OrderOperationalView
+    // above; keeping both here would show two conflicting "truths" side by side.
   ].map(([label, value]) => [label, value === null || value === undefined || value === "" ? "-" : value]);
 
   async function runAction(action, successMessage) {
@@ -92,7 +90,7 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
   const inputStyle = { borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" };
 
   return (
-    <aside className="w-full shrink-0 border-t bg-white xl:w-96 xl:border-l xl:border-t-0" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}>
+    <aside className="w-full shrink-0 border-t bg-white xl:w-[34rem] xl:border-l xl:border-t-0" style={{ borderColor: "var(--color-border)", backgroundColor: "var(--color-card)" }}>
       <div className="flex h-14 items-center justify-between border-b px-4" style={{ borderColor: "var(--color-border)" }}>
         <div>
           <div className="text-sm font-semibold">{order.orderCode}</div>
@@ -107,15 +105,20 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
       <div className="space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-124px)]">
         <StatusBadge status={status} />
 
+        {/* Operational view integration. fetchOperationalView is the same
+            authenticated `adapter` instance as onUpdateOrder/onDeleteOrder
+            above (threaded from App.jsx), not a separate/unauthenticated one. */}
+        <div className="mt-3">
+          <OrderOperationalView orderId={order?.id} fetchOperationalView={onFetchOrderOperationalView} />
+        </div>
+
         {!editing && (
           <dl className="space-y-3">
             {rows.map(([label, value]) => (
               <div key={label} className="grid grid-cols-[140px_1fr] gap-3 text-sm">
                 <dt style={{ color: "var(--color-text-muted)" }}>{label}</dt>
                 <dd className="font-medium">
-                  {label === terminology.supplierSingular && value !== "-" && onNavigate ? (
-                    <Citation onClick={() => onNavigate("suppliers", { supplierName: value })}>{value}</Citation>
-                  ) : label === terminology.projectSingular && value !== "-" && onNavigate ? (
+                  {label === terminology.projectSingular && value !== "-" && onNavigate ? (
                     <Citation onClick={() => onNavigate("projects", { projectCode: value })}>{value}</Citation>
                   ) : (
                     value
