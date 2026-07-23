@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { formatDate } from "../utils/dateUtils";
-import { formatNumber, formatPercent } from "../utils/formatters";
+import { formatNumber } from "../utils/formatters";
 import StatusBadge from "./StatusBadge";
 import Button from "./Button";
+import OrderOperationalView from "./OrderOperationalView";
 
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
 const BUYER_STATUSES = ["In attesa", "Confermato", "Ricevuto", "Annullato"];
@@ -42,13 +43,11 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
     ["Quantita", formatNumber(order.quantity)],
     ["Data ordine", formatDate(order.orderDate)],
     [terminology.dueDate, formatDate(order.dueDate)],
-    ["Data richiesta", formatDate(order.requiredDate)],
-    // Numero ordine assegnato dal fornitore (es. 13974707 Fedrigoni, 399863 Sunclear),
-    // utile per riscontro rapido durante un sollecito telefonico o via email.
-    ...(order.supplierOrderRef ? [["Rif. fornitore", order.supplierOrderRef]] : []),
-    ["Risposta fornitore", order.supplierResponse || "-"],
-    ["Solleciti", order.reminderCount ?? "-"],
-    ["AI confidence", formatPercent(order.aiConfidence)]
+    ["Data richiesta", formatDate(order.requiredDate)]
+    // supplierOrderRef / supplierResponse / reminderCount / aiConfidence removed:
+    // these were never populated by the production (Supabase) adapter and always
+    // rendered "-". The authoritative values now come from OrderOperationalView
+    // below; keeping both here would show two conflicting "truths" side by side.
   ].map(([label, value]) => [label, value === null || value === undefined || value === "" ? "-" : value]);
 
   async function runAction(action, successMessage) {
@@ -106,6 +105,11 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
       </div>
       <div className="space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-124px)]">
         <StatusBadge status={status} />
+
+        {/* Operational view integration */}
+        <div className="mt-3">
+          <OrderOperationalView orderId={order?.id} />
+        </div>
 
         {!editing && (
           <dl className="space-y-3">

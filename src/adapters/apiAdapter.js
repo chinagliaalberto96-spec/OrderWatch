@@ -18,7 +18,11 @@ export function createApiAdapter(dataSource, { getAccessToken } = {}) {
   async function parseOrThrow(response, label) {
     if (!response.ok) {
       const details = await response.json().catch(() => ({}));
-      throw new Error(details.detail || details.error || `${label} failed: ${response.status}`);
+      const error = new Error(details.detail || details.error || `${label} failed: ${response.status}`);
+      // Structured status lets callers branch on the real HTTP outcome
+      // instead of pattern-matching the error message text.
+      error.status = response.status;
+      throw error;
     }
     return response.json();
   }
@@ -48,8 +52,8 @@ export function createApiAdapter(dataSource, { getAccessToken } = {}) {
       return parseOrThrow(response, "Altera API");
     },
 
-    async getOrderOperationalView(orderId) {
-      const response = await apiFetch(`/api/order-operational-view?orderId=${encodeURIComponent(orderId)}`);
+    async getOrderOperationalView(orderId, { signal } = {}) {
+      const response = await apiFetch(`/api/order-operational-view?orderId=${encodeURIComponent(orderId)}`, { signal });
       return parseOrThrow(response, "Order operational view API");
     },
 
