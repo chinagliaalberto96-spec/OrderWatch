@@ -117,6 +117,38 @@ async function run() {
     }
     console.log('PASS');
 
+    console.log('Test: a sanitized 500 from the real endpoint never surfaces raw Supabase/SQL detail in the UI');
+    {
+      // Simulates the exact bug that shipped: the backend now sends only
+      // { error: "Impossibile caricare la vista operativa" } for an
+      // unexpected failure — never the raw PostgREST/SQL body. This test
+      // proves the full real chain (apiAdapter -> loadOrderOperationalView ->
+      // OrderOperationalViewContent) renders only that safe message.
+      const api = createApiAdapter(undefined, { getAccessToken: async () => 'tok' });
+      await withMockedFetch(
+        () => ({ ok: false, status: 500, json: async () => ({ error: 'Impossibile caricare la vista operativa' }) }),
+        async () => {
+          let dispatched;
+          const dispatch = (a) => { dispatched = a; };
+          await loadOrderOperationalView({
+            orderId: 'order-1',
+            fetchFn: (orderId, opts) => api.getOrderOperationalView(orderId, opts),
+            dispatch,
+            tokenRef: { current: 1 },
+            myToken: 1
+          });
+          assert.strictEqual(dispatched.type, 'LOAD_ERROR');
+          assert.strictEqual(dispatched.message, 'Impossibile caricare la vista operativa');
+          const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'error', error: dispatched.message, data: null }));
+          assert.ok(html.includes('Impossibile caricare la vista operativa'));
+          for (const forbidden of ['42703', 'line_number', 'canonical_operational_lines', 'Supabase request failed', 'PostgREST', 'code":']) {
+            assert.ok(!html.includes(forbidden), `rendered UI must not contain "${forbidden}"`);
+          }
+        }
+      );
+    }
+    console.log('PASS');
+
     console.log('Test: no token/credential leaks into the rendered error UI or console logs');
     {
       const SECRET_TOKEN = 'do-not-leak-this-token-xyz';

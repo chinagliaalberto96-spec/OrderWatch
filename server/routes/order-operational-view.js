@@ -116,8 +116,16 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
   }
 
   // 3) canonicalMaterialLines
+  // `canonical_operational_lines` (view, verified live against
+  // information_schema.columns) has no `line_number` column — that column
+  // only exists on the underlying per-kind tables (e.g. purchase_order_lines)
+  // that feed it, and is not projected through the view. Line-position
+  // ordering for a single source document lives on canonical_line_sources as
+  // source_line_number instead (see step 4) — it does not belong here.
+  // Ordering is by created_at with id as a deterministic tiebreaker, using
+  // only columns the view actually exposes.
   const lines = await reqDb(
-    `canonical_operational_lines?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,entity_kind,description,item_code,quantity,delivered_quantity,remaining_quantity,unit,required_date,due_date,status,confidence,needs_review,canonical_key,line_number,updated_at&order=line_number.asc`
+    `canonical_operational_lines?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,entity_kind,description,item_code,quantity,delivered_quantity,remaining_quantity,unit,required_date,due_date,status,confidence,needs_review,canonical_key,updated_at&order=created_at.asc,id.asc`
   );
 
   // 4) canonicalLineSources for evidence excerpts
@@ -333,6 +341,23 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
   return response;
 }
 
+// Maps any error thrown by getOrderOperationalView to a safe HTTP response
+// (status + body). Only the one already-classified, already-safe case
+// (statusCode 404, "Order not found") is passed through as-is; every other
+// error — a raw Supabase/PostgREST failure, a schema mismatch, a network
+// error — becomes a generic Italian message with no table/column/SQL detail,
+// while still preserving a genuine 4xx status code if one was set. Extracted
+// as a pure function so it is directly testable without a real HTTP request.
+export function toSafeErrorResponse(error) {
+  if (error?.statusCode === 404) {
+    return { status: 404, body: { error: "Order not found" } };
+  }
+  const status = Number.isInteger(error?.statusCode) && error.statusCode >= 400 && error.statusCode < 600
+    ? error.statusCode
+    : 500;
+  return { status, body: { error: "Impossibile caricare la vista operativa" } };
+}
+
 export default async function handler(request, response) {
   const user = await authorizeApiRequest(request, response, { roles: ["Owner", "IT", "Admin", "Buyer", "ReadOnly"] });
   if (!user) return;
@@ -352,7 +377,12 @@ export default async function handler(request, response) {
     response.setHeader("Cache-Control", "no-store");
     response.status(200).json(result);
   } catch (error) {
-    const safe = sanitizeSecurityError(error);
-    response.status(error.statusCode || 500).json({ error: "Unable to build order operational view", detail: safe });
+    // sanitizeSecurityError only redacts credential-like patterns, not
+    // schema/SQL detail, so it is used only for the server-side log line —
+    // never as response content. The response itself is built by
+    // toSafeErrorResponse, which never repeats table/column/SQL text.
+    console.error("[order-operational-view]", sanitizeSecurityError(error));
+    const { status, body } = toSafeErrorResponse(error);
+    response.status(status).json(body);
   }
 }
