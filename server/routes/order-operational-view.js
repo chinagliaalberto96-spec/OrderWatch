@@ -138,18 +138,35 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
   }
 
   // 5) linkedDocuments: delivery_notes, invoices, quotes, documents
+  //
+  // PostgREST select= does not support SQL "column as alias" syntax — it
+  // treats the whole string (e.g. "ddt_number as number") as one literal
+  // column name and 400s with PostgreSQL 42703 (undefined column). Every
+  // query below selects only real, tracked columns (verified live against
+  // information_schema.columns for each table) and renaming to the
+  // contracted response field names happens explicitly in the .map() below,
+  // never in the PostgREST URL.
+  //
+  // Note: delivery_notes has no "ddt_date" column (delivery_date/received_date
+  // exist instead) and documents has no "doc_type"/"doc_number"/"status"
+  // columns at all (document_type/name exist; documents is a raw ingested
+  // record with no workflow status). documents also has no "source_document_id"
+  // (that linkage exists only on the specialized tables that point back to a
+  // documents row, not on documents itself) and no "updated_at" (only
+  // "created_at" — documents is an immutable ingested record). All verified
+  // live, not assumed.
   const [deliveryNotes, invoices, quotes, documents] = await Promise.all([
-    reqDb(`delivery_notes?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,ddt_number as number,status,delivery_date as receivedAt,confidence,needs_review,source_email_id,source_document_id,updated_at`),
-    reqDb(`invoices?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,invoice_number as number,status,invoice_date as receivedAt,confidence,needs_review,source_email_id,source_document_id,updated_at`),
-    reqDb(`quotes?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,quote_code as number,status,updated_at as receivedAt,confidence,needs_review,source_email_id,source_document_id,updated_at`),
-    reqDb(`documents?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,doc_type as kind,doc_number as number,status,created_at as receivedAt,confidence,needs_review,source_email_id,source_document_id,updated_at`)
+    reqDb(`delivery_notes?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,ddt_number,status,delivery_date,confidence,needs_review,source_email_id,source_document_id,updated_at`),
+    reqDb(`invoices?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,invoice_number,status,invoice_date,confidence,needs_review,source_email_id,source_document_id,updated_at`),
+    reqDb(`quotes?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,quote_code,status,confidence,needs_review,source_email_id,source_document_id,updated_at`),
+    reqDb(`documents?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,document_type,name,received_at,confidence,needs_review,source_email_id,created_at`)
   ]);
 
   const linkedDocuments = [
-    ...(deliveryNotes || []).map((r) => ({ id: r.id, kind: 'delivery_note', number: r.number || null, status: r.status || null, receivedAt: r.receivedAt || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
-    ...(invoices || []).map((r) => ({ id: r.id, kind: 'invoice', number: r.number || null, status: r.status || null, receivedAt: r.receivedAt || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
-    ...(quotes || []).map((r) => ({ id: r.id, kind: 'quote', number: r.number || null, status: r.status || null, receivedAt: r.receivedAt || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
-    ...(documents || []).map((r) => ({ id: r.id, kind: r.kind || 'document', number: r.number || null, status: r.status || null, receivedAt: r.receivedAt || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null }))
+    ...(deliveryNotes || []).map((r) => ({ id: r.id, kind: 'delivery_note', number: r.ddt_number || null, status: r.status || null, receivedAt: r.delivery_date || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
+    ...(invoices || []).map((r) => ({ id: r.id, kind: 'invoice', number: r.invoice_number || null, status: r.status || null, receivedAt: r.invoice_date || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
+    ...(quotes || []).map((r) => ({ id: r.id, kind: 'quote', number: r.quote_code || null, status: r.status || null, receivedAt: r.updated_at || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null })),
+    ...(documents || []).map((r) => ({ id: r.id, kind: r.document_type || 'document', number: r.name || null, status: r.status || null, receivedAt: r.received_at || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null }))
   ];
 
   // 6) coverageAndSyncHealth (org-wide)

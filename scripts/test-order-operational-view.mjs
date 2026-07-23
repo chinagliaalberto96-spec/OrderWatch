@@ -70,8 +70,21 @@ async function run() {
         }
       ];
     }
-    if (path.startsWith('delivery_notes?') || path.startsWith('invoices?') || path.startsWith('quotes?') || path.startsWith('documents?')) {
-      return [];
+    // Fixtures use the REAL raw column names (no aliases) — this is exactly
+    // what PostgREST returns once the query no longer uses "column as alias".
+    if (path.startsWith('delivery_notes?')) {
+      return [{ id: 'ddt-1', ddt_number: 'DDT-2024-001', status: 'confirmed', delivery_date: '2024-01-10', confidence: 0.9, needs_review: false, source_email_id: 'se-2', source_document_id: null, updated_at: '2024-01-10T09:00:00Z' }];
+    }
+    if (path.startsWith('invoices?')) {
+      return [{ id: 'inv-1', invoice_number: 'FT-2024-055', status: 'matched', invoice_date: '2024-01-15', confidence: 0.95, needs_review: false, source_email_id: 'se-3', source_document_id: null, updated_at: '2024-01-15T09:00:00Z' }];
+    }
+    if (path.startsWith('quotes?')) {
+      return [{ id: 'quo-1', quote_code: 'PRV-2024-010', status: 'converted', confidence: 0.8, needs_review: false, source_email_id: 'se-4', source_document_id: null, updated_at: '2024-01-02T09:00:00Z' }];
+    }
+    if (path.startsWith('documents?')) {
+      // documents has no status/source_document_id/updated_at columns at all
+      // (verified live) — omitted here on purpose, not just unselected.
+      return [{ id: 'doc-1', document_type: 'DDT', name: 'ddt-scan.pdf', received_at: '2024-01-11T08:00:00Z', confidence: 0.7, needs_review: false, source_email_id: 'se-5', created_at: '2024-01-11T08:00:00Z' }];
     }
     if (path.startsWith('data_source_coverage?')) return [{ source_key: 'email_attachments', label: 'Email attachments', status: 'ok', reliability: 'high', message: null, limitation: null }];
     if (path.startsWith('system_health_alerts?')) return [];
@@ -94,7 +107,7 @@ async function run() {
   assert.strictEqual(out.summary.quantity, '10 pcs');
   assert.strictEqual(out.summary.alertLevel, 'warning');
   assert.strictEqual(out.summary.daysRemaining, 3);
-  assert.strictEqual(out.currentObservedSituation.asOf, '2024-01-07T11:00:00.000Z');
+  assert.strictEqual(out.currentObservedSituation.asOf, '2024-01-15T09:00:00.000Z');
   assert.ok(Array.isArray(out.canonicalMaterialLines));
   assert.strictEqual(out.canonicalMaterialLines.length, 2);
   assert.ok(Array.isArray(out.evidenceReferences));
@@ -127,7 +140,58 @@ async function run() {
       }
     }
   }
+  // linkedDocuments: real raw columns correctly mapped to the contracted shape
+  assert.strictEqual(out.linkedDocuments.length, 4);
+  const ddt = out.linkedDocuments.find((d) => d.kind === 'delivery_note');
+  assert.strictEqual(ddt.number, 'DDT-2024-001', 'delivery_note.number must come from the real ddt_number column');
+  assert.strictEqual(ddt.receivedAt, '2024-01-10', 'delivery_note.receivedAt must come from the real delivery_date column');
+  const invoice = out.linkedDocuments.find((d) => d.kind === 'invoice');
+  assert.strictEqual(invoice.number, 'FT-2024-055', 'invoice.number must come from the real invoice_number column');
+  assert.strictEqual(invoice.receivedAt, '2024-01-15', 'invoice.receivedAt must come from the real invoice_date column');
+  const quote = out.linkedDocuments.find((d) => d.kind === 'quote');
+  assert.strictEqual(quote.number, 'PRV-2024-010', 'quote.number must come from the real quote_code column');
+  assert.strictEqual(quote.receivedAt, '2024-01-02T09:00:00Z', 'quote.receivedAt must come from the real updated_at column');
+  const doc = out.linkedDocuments.find((d) => d.kind === 'DDT' && d.number === 'ddt-scan.pdf');
+  assert.ok(doc, 'generic document must map document_type -> kind and name -> number');
+  assert.strictEqual(doc.receivedAt, '2024-01-11T08:00:00Z', 'document.receivedAt must come from the real received_at column, not created_at');
+
   console.log('PASS: authenticated same-tenant');
+
+  console.log('Test: no query in this route uses SQL-style "column as alias" syntax');
+  {
+    for (const q of queries) {
+      assert.ok(!/ as /i.test(decodeURIComponent(q)), `query must not use SQL alias syntax: ${q}`);
+    }
+    // The route source itself must not contain the pattern either, beyond comments.
+    const source = await readFile(new URL('../server/routes/order-operational-view.js', import.meta.url), 'utf8');
+    const codeLines = source.split('\n').filter((line) => !line.trim().startsWith('//'));
+    for (const line of codeLines) {
+      assert.ok(!/select=[^`]* as /i.test(line), `select= clause must not use "as" aliasing: ${line}`);
+    }
+  }
+  console.log('PASS');
+
+  console.log('Test: delivery_notes/invoices/quotes/documents queries use only real, verified columns');
+  {
+    const REAL_COLUMNS = {
+      delivery_notes: new Set(['id', 'ddt_number', 'supplier_id', 'supplier_name', 'order_id', 'order_code', 'project_id', 'project_code', 'delivery_date', 'received_date', 'status', 'confidence', 'needs_review', 'source_email_id', 'source_document_id', 'notes', 'created_at', 'updated_at', 'organization_id', 'confirmed_at', 'confirmed_by', 'contact_id']),
+      invoices: new Set(['id', 'invoice_number', 'invoice_type', 'supplier_id', 'supplier_name', 'supplier_vat', 'customer_name', 'order_id', 'order_code', 'project_id', 'project_code', 'invoice_date', 'due_date', 'total_amount', 'currency', 'sdi_identifier', 'xml_payload_hash', 'status', 'confidence', 'needs_review', 'source_email_id', 'source_document_id', 'notes', 'created_at', 'updated_at', 'organization_id', 'contact_id', 'canonical_key', 'match_status', 'match_method', 'match_confidence', 'match_candidates']),
+      quotes: new Set(['id', 'quote_code', 'quote_type', 'supplier_id', 'supplier_name', 'customer_name', 'project_id', 'project_code', 'quote_date', 'valid_until', 'total_amount', 'currency', 'status', 'confidence', 'needs_review', 'source_email_id', 'source_document_id', 'notes', 'created_at', 'updated_at', 'organization_id', 'contact_id', 'canonical_key', 'normalized_reference', 'source_thread_id']),
+      documents: new Set(['id', 'name', 'type', 'supplier_id', 'supplier_name', 'order_id', 'linked_order_code', 'confidence', 'received_at', 'source_email_id', 'created_at', 'filename', 'document_type', 'file_hash', 'extracted_text_hash', 'needs_review', 'metadata', 'organization_id', 'contact_id', 'channel'])
+    };
+    for (const [table, realColumns] of Object.entries(REAL_COLUMNS)) {
+      const q = queries.find((query) => query.startsWith(`${table}?`));
+      assert.ok(q, `expected a ${table} query`);
+      assert.ok(q.includes(`organization_id=eq.`), `${table} query must be tenant-scoped: ${q}`);
+      assert.ok(q.includes(`order_id=eq.`), `${table} query must be filtered by order: ${q}`);
+      const selectMatch = q.match(/select=([^&]+)/);
+      assert.ok(selectMatch, `expected a select= clause for ${table}`);
+      for (const col of selectMatch[1].split(',')) {
+        assert.ok(realColumns.has(col), `selected column "${col}" does not exist on ${table}: ${q}`);
+      }
+    }
+  }
+  console.log('PASS');
 
   console.log('Test: canonical_operational_lines query requests only real columns, never line_number');
   {
