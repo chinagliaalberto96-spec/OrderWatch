@@ -22,6 +22,7 @@ import ReceivingView from "./views/ReceivingView";
 import AlteraView from "./views/AlteraView";
 import SettingsView from "./views/SettingsView";
 import SuppliersView from "./views/SuppliersView";
+import PilotDataQualityView from "./views/PilotDataQualityView";
 import ContactsView from "./views/ContactsView";
 import { AUTH_MODE, getAccessToken, getAuthClient } from "./lib/authClient";
 import PasswordResetView from "./views/PasswordResetView";
@@ -43,7 +44,8 @@ const viewLabels = (terminology) => ({
   reminders: "Notifiche",
   receiving: "Ricevimenti",
   altera: "Altera",
-  settings: "Impostazioni"
+  settings: "Impostazioni",
+  pilot_data_quality: "Qualità dati (pilota)"
 });
 
 const REFRESH_INTERVAL_MS = 60000;
@@ -135,6 +137,14 @@ export default function App() {
     [adapter]
   );
 
+  // Same authenticated `adapter` instance as every other protected call;
+  // stable across renders so the child's useEffect (PilotDataQualityView)
+  // fetches once on mount, not on every App re-render.
+  const handleFetchPilotQualityContract = useCallback(
+    (options) => adapter.getPilotQualityContract(options),
+    [adapter]
+  );
+
   useEffect(() => {
     if (AUTH_MODE !== "supabase") return undefined;
 
@@ -203,7 +213,7 @@ export default function App() {
 
   const navItems = useMemo(
     () =>
-      ["dashboard", "altera", "orders", "projects", "contract_watch", "suppliers", "contacts", "quotes", "receiving", "documents", "invoices", "imports", "reminders", "settings"]
+      ["dashboard", "altera", "orders", "projects", "contract_watch", "suppliers", "contacts", "quotes", "receiving", "documents", "invoices", "imports", "reminders", "pilot_data_quality", "settings"]
         .filter((key) => (config.modules[key] || backendModuleFlags[key] === true) && backendModuleFlags[key] !== false)
         .filter((key) => canAccessView(sessionUser?.role, key))
         .map((key) => ({ key, label: labels[key] })),
@@ -815,6 +825,12 @@ export default function App() {
           {activeView === "invoices" && <InvoicesView config={config} invoices={filteredData.invoices} />}
           {activeView === "imports" && <ImportsView config={config} processedEmails={filteredData.processedEmails} focusEmailId={drilldown.emailId} />}
           {activeView === "reminders" && <NotificationsView config={config} data={filteredData} onNavigate={handleNavigate} />}
+          {/* Pilot Data Quality: loads the real dataQualityContract from
+              GET /api/pilot-quality-contract via the authenticated adapter.
+              No mock data anywhere in this path. */}
+          {activeView === "pilot_data_quality" && (
+            <PilotDataQualityView fetchContract={handleFetchPilotQualityContract} organizationName={sessionUser?.organizationName} />
+          )}
           {activeView === "settings" && (
             <SettingsView
               config={config}

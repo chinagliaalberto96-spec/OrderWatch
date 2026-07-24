@@ -1,12 +1,16 @@
 // Pilot Control Check — read-only core logic.
 //
-// This module is deliberately NOT under server/ or api/: it is a CLI-only
-// reporting tool, never wired into the production HTTP surface, never
-// imported by anything that runs in Vercel. It reuses the same
-// getOrderOperationalView() the production route uses (so it inherits its
-// tenant-isolation and read-only guarantees rather than re-implementing
-// them), plus a few additional light, tenant-scoped GET-only queries needed
-// for candidate selection across many orders at once.
+// This module is deliberately NOT under server/ or api/: its home stays
+// scripts/lib so it remains directly runnable from the CLI
+// (scripts/run-pilot-control-check.mjs) without any HTTP/auth context. As of
+// server/routes/pilot-quality-contract.js it IS also imported by a real,
+// authenticated, tenant-scoped production route — that route supplies
+// organizationId only from the authenticated session (never from client
+// input) and reuses runPilotControlCheck()/buildDataQualityContract() as-is,
+// so this module's own read-only, tenant-scoped guarantees (inherited from
+// getOrderOperationalView(), which it reuses rather than re-implementing)
+// carry through to the live endpoint unchanged. It still has zero knowledge
+// of HTTP, auth, or Vercel itself — that stays entirely the route's concern.
 //
 // Scope discipline (per PILOT_RELIABILITY_AND_VALUE_METRICS.md): this tool
 // measures coverage, internal consistency and traceability only. It never
@@ -43,6 +47,19 @@ const COVERAGE_KEYS = ["inboundEmail", "outboundEmail", "attachments", "operatio
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+// Small, human-readable summaries attached to issues alongside (never
+// instead of) their id — a support operator reading a finding must not have
+// to re-query the database just to know what a line/document actually is.
+// Never includes raw email/document body content, only the same structured
+// fields getOrderOperationalView() already exposes (description/itemCode,
+// kind/number).
+function lineSummary(l) {
+  return { id: l.id, description: l.description || null, itemCode: l.itemCode || null };
+}
+function documentSummary(d) {
+  return { id: d.id, kind: d.kind || null, number: d.number || null };
 }
 
 /* ------------------------------------------------------------------ *
@@ -89,6 +106,7 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
         linkedDocumentCount: null,
         observedSourceStates: null,
         missingSourceStates: null,
+        coverageByKey: null,
         unavailableSections: []
       },
       internalConsistency: {
@@ -116,7 +134,7 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
         limitationReasonCodes: ["ORDER_NOT_FOUND_UNDER_TENANT"]
       },
       manualReview: { reviewerVerdict: null, reviewerNotes: "", buyerCanDecideWithoutExternalSearch: null },
-      issues: [{ category: ISSUE_CATEGORIES.ORDER_LINK_MISSING, message: error || "Order not found under this organization.", orderCode: null }]
+      issues: [{ category: ISSUE_CATEGORIES.ORDER_LINK_MISSING, message: error || "Order not found under this organization.", orderCode: null, lineIds: [], evidenceRefs: [] }]
     };
   }
 
@@ -133,36 +151,53 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
   const linesWithEvidence = lines.filter((l) => Array.isArray(l.provenanceRefs) && l.provenanceRefs.length > 0).length;
   const canonicalLineCount = lines.length;
   const evidenceCoverageRatio = ratio(linesWithEvidence, canonicalLineCount);
-  if (canonicalLineCount === 0) issues.push({ category: ISSUE_CATEGORIES.SECTION_NOT_EVALUATED, message: "No canonical lines exist for this order — evidence coverage ratio is undetermined, not 0.", orderCode: view.orderNumber });
+  if (canonicalLineCount === 0) issues.push({ category: ISSUE_CATEGORIES.SECTION_NOT_EVALUATED, message: "No canonical lines exist for this order — evidence coverage ratio is undetermined, not 0.", orderCode: view.orderNumber, lineIds: [], evidenceRefs: [], sectionKey: "canonicalLines" });
 
+  // Structured per-key coverage status, kept alongside the existing
+  // observed/missing counts — additive, so nothing that already reads
+  // observedSourceStates/missingSourceStates or the issues array changes.
   const coverageEntries = COVERAGE_KEYS.map((k) => view.coverageAndSyncHealth?.[k] || null);
+  const coverageByKey = {};
+  COVERAGE_KEYS.forEach((key, i) => { coverageByKey[key] = coverageEntries[i]?.status || null; });
   const observedSourceStates = coverageEntries.filter((e) => e && (e.status === "available" || e.status === "partial")).length;
   const missingSourceStates = coverageEntries.filter((e) => !e || e.status === "unavailable").length;
+  // sourceKey is structured (not just embedded in the message string) so a
+  // support tool can identify which coverage source is affected without
+  // parsing prose. These 3 categories describe an ORGANIZATION-WIDE fact
+  // (coverageAndSyncHealth is identical across every order in the org, see
+  // ORDER_OPERATIONAL_VIEW_CONTRACT.md §3.15) — dataQualityContract.mjs
+  // deduplicates them into a separate organizationFindings[] list rather
+  // than repeating the same fact once per order.
   COVERAGE_KEYS.forEach((key, i) => {
     const entry = coverageEntries[i];
-    if (!entry) issues.push({ category: ISSUE_CATEGORIES.SOURCE_UNAVAILABLE, message: `Source coverage entry "${key}" was not returned at all (outside current coverage, not an error).`, orderCode: view.orderNumber });
-    else if (entry.status === "unavailable") issues.push({ category: ISSUE_CATEGORIES.SOURCE_UNWATCHED, message: `Source "${key}" is not currently watched (status: unavailable).`, orderCode: view.orderNumber });
-    else if (entry.status === "partial") issues.push({ category: ISSUE_CATEGORIES.SOURCE_INCOMPLETE, message: `Source "${key}" has only partial coverage.`, orderCode: view.orderNumber });
+    if (!entry) issues.push({ category: ISSUE_CATEGORIES.SOURCE_UNAVAILABLE, message: `Source coverage entry "${key}" was not returned at all (outside current coverage, not an error).`, orderCode: view.orderNumber, lineIds: [], evidenceRefs: [], sourceKey: key });
+    else if (entry.status === "unavailable") issues.push({ category: ISSUE_CATEGORIES.SOURCE_UNWATCHED, message: `Source "${key}" is not currently watched (status: unavailable).`, orderCode: view.orderNumber, lineIds: [], evidenceRefs: [], sourceKey: key });
+    else if (entry.status === "partial") issues.push({ category: ISSUE_CATEGORIES.SOURCE_INCOMPLETE, message: `Source "${key}" has only partial coverage.`, orderCode: view.orderNumber, lineIds: [], evidenceRefs: [], sourceKey: key });
   });
 
+  // sectionKey is structured for the same reason as sourceKey above — but
+  // unlike coverage sources, each of these *Available flags is genuinely
+  // per-order (computed by getOrderOperationalView() for this one order),
+  // so these stay as ordinary per-order findings, never deduplicated.
   const unavailableSections = [];
   if (view.unresolvedEvidenceAvailable === false) unavailableSections.push("unresolvedEvidence");
   if (view.ambiguousEvidenceAvailable === false) unavailableSections.push("ambiguousEvidence");
   if (view.activeCommitmentsAvailable === false) unavailableSections.push("activeCommitments");
   if (view.supersededCommitmentsAvailable === false) unavailableSections.push("supersededCommitments");
-  for (const s of unavailableSections) issues.push({ category: ISSUE_CATEGORIES.SECTION_NOT_EVALUATED, message: `Section "${s}" is not evaluated for this order (available=false) — absence is not evidence of "none found".`, orderCode: view.orderNumber });
+  for (const s of unavailableSections) issues.push({ category: ISSUE_CATEGORIES.SECTION_NOT_EVALUATED, message: `Section "${s}" is not evaluated for this order (available=false) — absence is not evidence of "none found".`, orderCode: view.orderNumber, lineIds: [], evidenceRefs: [], sectionKey: s });
 
   // --- Internal consistency --------------------------------------------
   const canonicalKeyGroups = new Map();
   for (const l of lines) {
     if (!l.canonicalKey) continue;
-    canonicalKeyGroups.set(l.canonicalKey, (canonicalKeyGroups.get(l.canonicalKey) || 0) + 1);
+    if (!canonicalKeyGroups.has(l.canonicalKey)) canonicalKeyGroups.set(l.canonicalKey, []);
+    canonicalKeyGroups.get(l.canonicalKey).push(l);
   }
   let duplicateCanonicalLines = 0;
-  for (const count of canonicalKeyGroups.values()) {
-    if (count > 1) {
-      duplicateCanonicalLines += count - 1;
-      issues.push({ category: ISSUE_CATEGORIES.DUPLICATE_LINE, message: `${count} canonical lines share the same canonicalKey.`, orderCode: view.orderNumber });
+  for (const groupLines of canonicalKeyGroups.values()) {
+    if (groupLines.length > 1) {
+      duplicateCanonicalLines += groupLines.length - 1;
+      issues.push({ category: ISSUE_CATEGORIES.DUPLICATE_LINE, message: `${groupLines.length} canonical lines share the same canonicalKey.`, orderCode: view.orderNumber, lineIds: groupLines.map(lineSummary), evidenceRefs: [] });
     }
   }
 
@@ -177,7 +212,7 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
       referencedRefs.add(ref);
       if (!evidenceRefSet.has(ref)) {
         danglingProvenanceRefs += 1;
-        issues.push({ category: ISSUE_CATEGORIES.DANGLING_PROVENANCE, message: `Line "${l.description || l.id}" cites evidence ref "${ref}" which does not resolve to any evidenceReferences entry.`, orderCode: view.orderNumber });
+        issues.push({ category: ISSUE_CATEGORIES.DANGLING_PROVENANCE, message: `Line "${l.description || l.id}" cites evidence ref "${ref}" which does not resolve to any evidenceReferences entry.`, orderCode: view.orderNumber, lineIds: [lineSummary(l)], evidenceRefs: [ref] });
       }
     }
   }
@@ -207,14 +242,14 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
       const values = new Set(parsed.map((p) => p[field]).filter((v) => v !== undefined && v !== null && v !== ""));
       if (values.size > 1) {
         quantityConflicts += 1;
-        issues.push({ category: ISSUE_CATEGORIES.QUANTITY_CONFLICT, message: `Line "${l.description || l.id}" has disagreeing observed "${field}" values across its evidence: ${Array.from(values).join(", ")}.`, orderCode: view.orderNumber });
+        issues.push({ category: ISSUE_CATEGORIES.QUANTITY_CONFLICT, message: `Line "${l.description || l.id}" has disagreeing observed "${field}" values across its evidence: ${Array.from(values).join(", ")}.`, orderCode: view.orderNumber, lineIds: [lineSummary(l)], evidenceRefs: refs });
       }
     }
     for (const field of ["due_date", "required_date"]) {
       const values = new Set(parsed.map((p) => p[field]).filter((v) => v !== undefined && v !== null && v !== ""));
       if (values.size > 1) {
         dateConflicts += 1;
-        issues.push({ category: ISSUE_CATEGORIES.DATE_CONFLICT, message: `Line "${l.description || l.id}" has disagreeing observed "${field}" values across its evidence: ${Array.from(values).join(", ")}.`, orderCode: view.orderNumber });
+        issues.push({ category: ISSUE_CATEGORIES.DATE_CONFLICT, message: `Line "${l.description || l.id}" has disagreeing observed "${field}" values across its evidence: ${Array.from(values).join(", ")}.`, orderCode: view.orderNumber, lineIds: [lineSummary(l)], evidenceRefs: refs });
       }
     }
   }
@@ -230,17 +265,19 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
   const isUnvalidatedPlaceholder = !situation.label && (!Array.isArray(situation.reasonCodes) || situation.reasonCodes.length === 0);
   const contradictoryOrderStateSignals = (Number.isFinite(daysRemaining) && daysRemaining < 0 && situation.severity === "ok" && isUnvalidatedPlaceholder) ? 1 : 0;
   if (contradictoryOrderStateSignals) {
-    issues.push({ category: ISSUE_CATEGORIES.OPERATIONAL_STATE_UNEXPLAINED, message: `Order is ${daysRemaining} days overdue but currentObservedSituation still reports the unvalidated "ok" placeholder (label:null, reasonCodes:[]) — never presented as healthy without this being explained.`, orderCode: view.orderNumber });
+    issues.push({ category: ISSUE_CATEGORIES.OPERATIONAL_STATE_UNEXPLAINED, message: `Order is ${daysRemaining} days overdue but currentObservedSituation still reports the unvalidated "ok" placeholder (label:null, reasonCodes:[]) — never presented as healthy without this being explained.`, orderCode: view.orderNumber, lineIds: [], evidenceRefs: [] });
   }
 
   // --- Traceability ------------------------------------------------------
-  const linesWithoutProvenance = canonicalLineCount - linesWithEvidence;
-  if (linesWithoutProvenance > 0) issues.push({ category: ISSUE_CATEGORIES.LINE_WITHOUT_EVIDENCE, message: `${linesWithoutProvenance} of ${canonicalLineCount} canonical lines have no provenance reference at all.`, orderCode: view.orderNumber });
+  const linesWithoutProvenanceLines = lines.filter((l) => !Array.isArray(l.provenanceRefs) || l.provenanceRefs.length === 0);
+  const linesWithoutProvenance = linesWithoutProvenanceLines.length;
+  if (linesWithoutProvenance > 0) issues.push({ category: ISSUE_CATEGORIES.LINE_WITHOUT_EVIDENCE, message: `${linesWithoutProvenance} of ${canonicalLineCount} canonical lines have no provenance reference at all.`, orderCode: view.orderNumber, lineIds: linesWithoutProvenanceLines.map(lineSummary), evidenceRefs: [] });
 
   const evidenceWithoutSafeExcerpt = evidenceReferences.filter((e) => (excerptByRef.get(e.ref) ?? null) === null).length;
 
-  const documentsWithoutDeterministicOrderLink = linkedDocuments.filter((d) => !DETERMINISTIC_LINK_KINDS.has(d.kind)).length;
-  if (documentsWithoutDeterministicOrderLink > 0) issues.push({ category: ISSUE_CATEGORIES.DOCUMENT_LINK_UNPROVEN, message: `${documentsWithoutDeterministicOrderLink} linked document(s) have a kind outside the proven deterministic-link set (${Array.from(DETERMINISTIC_LINK_KINDS).join(", ")}).`, orderCode: view.orderNumber });
+  const documentsWithoutDeterministicOrderLinkDocs = linkedDocuments.filter((d) => !DETERMINISTIC_LINK_KINDS.has(d.kind));
+  const documentsWithoutDeterministicOrderLink = documentsWithoutDeterministicOrderLinkDocs.length;
+  if (documentsWithoutDeterministicOrderLink > 0) issues.push({ category: ISSUE_CATEGORIES.DOCUMENT_LINK_UNPROVEN, message: `${documentsWithoutDeterministicOrderLink} linked document(s) have a kind outside the proven deterministic-link set (${Array.from(DETERMINISTIC_LINK_KINDS).join(", ")}).`, orderCode: view.orderNumber, lineIds: [], evidenceRefs: [], documentIds: documentsWithoutDeterministicOrderLinkDocs.map(documentSummary) });
   const documentTraceabilityRatio = ratio(linkedDocuments.length - documentsWithoutDeterministicOrderLink, linkedDocuments.length);
 
   // --- System limitations -------------------------------------------------
@@ -265,6 +302,7 @@ export function buildPilotCase({ organizationId, orderId, selectionReason, view,
       linkedDocumentCount: linkedDocuments.length,
       observedSourceStates,
       missingSourceStates,
+      coverageByKey,
       unavailableSections
     },
     internalConsistency: {

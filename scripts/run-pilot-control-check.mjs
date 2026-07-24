@@ -20,6 +20,7 @@ import {
   buildMarkdownReport,
   buildCsvReport
 } from "./lib/pilotControlCheck.mjs";
+import { buildDataQualityContract } from "./lib/dataQualityContract.mjs";
 
 function parseArgs(argv) {
   const result = {};
@@ -74,18 +75,27 @@ async function main() {
     return;
   }
 
+  const contract = buildDataQualityContract({ organizationId: report.organizationId, generatedAt: report.generatedAt, pilotCases: report.pilotCases });
+
   const summary = {
     organizationId: report.organizationId,
     ordersEvaluated: report.pilotCases.length,
     ordersAvailable: report.pilotCases.filter((p) => p.coverage.orderAvailable).length,
     selectionDeficits: report.selectionDeficits.length,
     totalIssues: report.aggregateIssues.reduce((sum, i) => sum + i.count, 0),
-    issueCategoryCounts: Object.fromEntries(report.aggregateIssues.map((i) => [i.category, i.count]))
+    issueCategoryCounts: Object.fromEntries(report.aggregateIssues.map((i) => [i.category, i.count])),
+    dataQualityContract: {
+      organizationSources: contract.organizationSources,
+      summary: contract.summary,
+      qualityIndicators: contract.qualityIndicators,
+      systemIntegrityChecks: contract.systemIntegrityChecks,
+      findingsCount: contract.findings.length
+    }
   };
   console.log(JSON.stringify({ mode: dryRun ? "dry-run (no files written)" : "write", summary }, null, 2));
 
   if (dryRun) {
-    console.log(`\nDry run: no files written. Re-run with --dry-run false --output <dir> to write the JSON/Markdown/CSV reports.`);
+    console.log(`\nDry run: no files written. Re-run with --dry-run false --output <dir> to write the JSON/Markdown/CSV/quality-contract reports.`);
     return;
   }
 
@@ -95,12 +105,14 @@ async function main() {
   const jsonPath = path.join(outputDir, `${base}.json`);
   const mdPath = path.join(outputDir, `${base}.md`);
   const csvPath = path.join(outputDir, `${base}.csv`);
+  const contractPath = path.join(outputDir, `${base}.quality-contract.json`);
 
   await writeFile(jsonPath, JSON.stringify(report, null, 2), "utf8");
   await writeFile(mdPath, buildMarkdownReport(report), "utf8");
   await writeFile(csvPath, buildCsvReport(report.pilotCases), "utf8");
+  await writeFile(contractPath, JSON.stringify(contract, null, 2), "utf8");
 
-  console.log(`\nWritten:\n- ${jsonPath}\n- ${mdPath}\n- ${csvPath}`);
+  console.log(`\nWritten:\n- ${jsonPath}\n- ${mdPath}\n- ${csvPath}\n- ${contractPath}`);
 }
 
 main();

@@ -19,7 +19,9 @@ function orderwatchApiDevPlugin() {
     "/report-recipients": () => import("./server/admin/report-recipients.js"),
     "/operational-actions": () => import("./server/routes/operational-actions.js"),
     "/customer-confirmations": () => import("./server/routes/customer-confirmations.js"),
-    "/receiving": () => import("./server/routes/receiving.js")
+    "/receiving": () => import("./server/routes/receiving.js"),
+    "/order-operational-view": () => import("./server/routes/order-operational-view.js"),
+    "/pilot-quality-contract": () => import("./server/routes/pilot-quality-contract.js")
   };
 
   return {

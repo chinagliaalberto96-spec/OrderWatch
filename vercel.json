@@ -14,6 +14,7 @@
     { "source": "/api/operational-actions", "destination": "/api/app?route=operational-actions" },
     { "source": "/api/order-operational-view", "destination": "/api/app?route=order-operational-view" },
     { "source": "/api/orders", "destination": "/api/app?route=orders" },
+    { "source": "/api/pilot-quality-contract", "destination": "/api/app?route=pilot-quality-contract" },
     { "source": "/api/projects", "destination": "/api/app?route=projects" },
     { "source": "/api/receiving", "destination": "/api/app?route=receiving" },
     { "source": "/api/supplier-orders", "destination": "/api/app?route=supplier-orders" },

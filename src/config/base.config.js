@@ -72,7 +72,8 @@ const baseConfig = {
     reminders: true,
     receiving: true,
     altera: true,
-    settings: true
+    settings: true,
+    pilot_data_quality: true
   },
   alertRules: {
     warningDays: 7,

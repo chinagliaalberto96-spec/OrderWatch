@@ -12,6 +12,7 @@ import receivingHandler from "../server/routes/receiving.js";
 import supplierOrdersHandler from "../server/routes/supplier-orders.js";
 import suppliersHandler from "../server/routes/suppliers.js";
 import orderOperationalViewHandler from "../server/routes/order-operational-view.js";
+import pilotQualityContractHandler from "../server/routes/pilot-quality-contract.js";
 import alteraHandler from "../server/routes/altera.js";
 import alteraTelegramHandler from "../server/routes/altera-telegram.js";
 import telegramConnectionsHandler from "../server/routes/telegram-connections.js";
@@ -34,6 +35,7 @@ const handlers = {
     return ordersHandler(request, response);
   },
   "order-operational-view": orderOperationalViewHandler,
+  "pilot-quality-contract": pilotQualityContractHandler,
   projects: projectsHandler,
   "procurement-requirements": procurementRequirementsHandler,
   receiving: receivingHandler,

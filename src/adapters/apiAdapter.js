@@ -57,6 +57,15 @@ export function createApiAdapter(dataSource, { getAccessToken } = {}) {
       return parseOrThrow(response, "Order operational view API");
     },
 
+    async getPilotQualityContract({ orderId, limit, signal } = {}) {
+      const params = new URLSearchParams();
+      if (orderId) params.set("orderId", orderId);
+      if (limit) params.set("limit", String(limit));
+      const query = params.toString() ? `?${params.toString()}` : "";
+      const response = await apiFetch(`/api/pilot-quality-contract${query}`, { signal });
+      return parseOrThrow(response, "Pilot quality contract API");
+    },
+
     async askAltera(question, conversationId = null) {
       const response = await apiFetch("/api/altera", {
         method: "POST",
