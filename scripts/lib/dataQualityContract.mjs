@@ -49,6 +49,16 @@
 //       * OPERATIONAL_STATE_UNEXPLAINED's recommendedAction is rewritten for
 //         a support operator (what to check before talking to the customer),
 //         not for a product/engineering decision.
+//   - v2.3.0 deduplicates pilot cases and contract orders by their stable
+//     `orderId`, preventing duplicated findings and inflated per-order counts.
+//     It also refines `dataQualityStatus` semantics:
+//       * orders whose only findings are SECTION_NOT_EVALUATED are classified
+//         as `not_evaluated`, while those findings remain visible;
+//       * missing line evidence continues to produce `incomplete_evidence`;
+//       * genuine order-specific findings continue to produce
+//         `open_findings`;
+//       * `complete` is never fabricated when required sections are
+//         unavailable.
 //
 // The four dimensions this contract preserves, matching the task's explicit
 // requirement:
@@ -328,14 +338,30 @@ function buildOrganizationFindings(organizationId, pilotCases) {
 // facts only (never inferred, never a score). "unavailable" takes priority
 // over everything else (an order that couldn't even be loaded has nothing
 // else meaningfully evaluated); "not_evaluated" means the order loaded but
-// has zero canonical lines, so evidence coverage is undetermined rather than
-// vacuously "complete".
-function deriveDataQualityStatus({ orderAvailable, totalLines, coveredLines, findingCount }) {
+// lacks enough evaluated sections to make a structural assessment. Pure
+// SECTION_NOT_EVALUATED findings are still visible in findings[], but do not
+// imply the order itself has an open problem.
+function deriveDataQualityStatus({ orderAvailable, totalLines, coveredLines, orderFindings }) {
   if (!orderAvailable) return ORDER_STATUS.UNAVAILABLE;
   if (!totalLines) return ORDER_STATUS.NOT_EVALUATED;
   if (coveredLines < totalLines) return ORDER_STATUS.INCOMPLETE_EVIDENCE;
-  if (findingCount > 0) return ORDER_STATUS.OPEN_FINDINGS;
+  const findings = Array.isArray(orderFindings) ? orderFindings : [];
+  const evaluatedFindings = findings.filter((f) => f.type !== ISSUE_CATEGORIES.SECTION_NOT_EVALUATED);
+  if (evaluatedFindings.length > 0) return ORDER_STATUS.OPEN_FINDINGS;
+  if (findings.some((f) => f.type === ISSUE_CATEGORIES.SECTION_NOT_EVALUATED)) return ORDER_STATUS.NOT_EVALUATED;
   return ORDER_STATUS.COMPLETE;
+}
+
+function uniquePilotCasesByOrderId(pilotCases) {
+  const seen = new Set();
+  const unique = [];
+  for (const pc of pilotCases || []) {
+    const key = pc?.orderId;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(pc);
+  }
+  return unique;
 }
 
 /* ------------------------------------------------------------------ *
@@ -370,7 +396,7 @@ function buildOrders(pilotCases, findings) {
       evidenceCoverage: { coveredLines, totalLines },
       findingCount: orderFindings.length,
       findingsSummary,
-      dataQualityStatus: deriveDataQualityStatus({ orderAvailable: pc.coverage.orderAvailable, totalLines, coveredLines, findingCount: orderFindings.length })
+      dataQualityStatus: deriveDataQualityStatus({ orderAvailable: pc.coverage.orderAvailable, totalLines, coveredLines, orderFindings })
     };
   });
 }
@@ -381,9 +407,10 @@ function buildOrders(pilotCases, findings) {
  * generatedAt (so callers can pin it for reproducible snapshots/tests).
  * ------------------------------------------------------------------ */
 export function buildDataQualityContract({ organizationId, generatedAt, pilotCases }) {
-  const findings = buildFindings(organizationId, pilotCases);
+  const uniquePilotCases = uniquePilotCasesByOrderId(pilotCases);
+  const findings = buildFindings(organizationId, uniquePilotCases);
   return {
-    contractVersion: "2.2.0",
+    contractVersion: "2.3.0",
     generatedAt,
     organizationId,
     scope: {
@@ -394,12 +421,12 @@ export function buildDataQualityContract({ organizationId, generatedAt, pilotCas
         "supplier performance — every finding describes OrderWatch's own pipeline coverage/linking, never supplier behavior"
       ]
     },
-    organizationSources: buildOrganizationSources(pilotCases),
-    organizationFindings: buildOrganizationFindings(organizationId, pilotCases),
-    summary: buildSummary(pilotCases),
-    qualityIndicators: buildQualityIndicators(pilotCases),
-    systemIntegrityChecks: buildSystemIntegrityChecks(pilotCases),
-    orders: buildOrders(pilotCases, findings),
+    organizationSources: buildOrganizationSources(uniquePilotCases),
+    organizationFindings: buildOrganizationFindings(organizationId, uniquePilotCases),
+    summary: buildSummary(uniquePilotCases),
+    qualityIndicators: buildQualityIndicators(uniquePilotCases),
+    systemIntegrityChecks: buildSystemIntegrityChecks(uniquePilotCases),
+    orders: buildOrders(uniquePilotCases, findings),
     findings
   };
 }

@@ -298,7 +298,7 @@ async function run() {
   }
   console.log('PASS');
 
-  console.log('Test: v2.1.0/v2.2.0 additions are additive at the top level — every field introduced by an earlier version is still present');
+  console.log('Test: v2.1.0/v2.2.0/v2.3.0 additions are additive at the top level — every field introduced by an earlier version is still present');
   {
     const pc = buildPilotCase({
       organizationId: 'org-1', orderId: 'order-1', view: baseView({
@@ -312,7 +312,7 @@ async function run() {
       assert.ok(Object.prototype.hasOwnProperty.call(contract, key), `pre-existing top-level field "${key}" must still be present`);
     }
     assert.ok(Object.prototype.hasOwnProperty.call(contract, 'organizationFindings'), 'the new v2.2.0 "organizationFindings" field must be present');
-    assert.strictEqual(contract.contractVersion, '2.2.0');
+    assert.strictEqual(contract.contractVersion, '2.3.0');
   }
   console.log('PASS');
 
@@ -410,6 +410,83 @@ async function run() {
     assert.strictEqual(byId['order-c'].dataQualityStatus, ORDER_STATUS.COMPLETE);
     assert.strictEqual(byId['order-c'].findingCount, 0);
     assert.deepStrictEqual(byId['order-c'].findingsSummary, { critical: 0, warning: 0, info: 0 });
+  }
+  console.log('PASS');
+
+  console.log('Regression: duplicate pilotCases are deduplicated by orderId before orders/findings are built');
+  {
+    const pc = buildPilotCase({
+      organizationId: 'org-1', orderId: 'order-dup', view: baseView({
+        orderId: 'order-dup', orderNumber: 'PO-DUP',
+        canonicalMaterialLines: [
+          { id: 'l1', description: 'A', canonicalKey: 'k1', provenanceRefs: ['E1'] },
+          { id: 'l2', description: 'B', canonicalKey: 'k2', provenanceRefs: [] }
+        ],
+        evidenceReferences: [{ ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' }]
+      })
+    });
+    const contract = buildDataQualityContract({ organizationId: 'org-1', generatedAt: '2026-01-01T00:00:00.000Z', pilotCases: [pc, JSON.parse(JSON.stringify(pc))] });
+    assert.strictEqual(contract.summary.totalOrders, 1, 'duplicate pilotCases must not inflate the evaluated order count');
+    assert.strictEqual(contract.orders.length, 1, 'contract.orders must contain unique orderId values');
+    assert.deepStrictEqual(contract.orders.map((o) => o.orderId), ['order-dup']);
+    const findingIds = contract.findings.map((f) => f.findingId);
+    assert.strictEqual(new Set(findingIds).size, findingIds.length, 'deduped contract must not emit duplicate findingId values');
+    assert.strictEqual(contract.findings.filter((f) => f.orderId === 'order-dup' && f.type === 'LINE_WITHOUT_EVIDENCE').length, 1, 'duplicate candidates must not inflate per-order finding counts');
+  }
+  console.log('PASS');
+
+  console.log('Regression: SECTION_NOT_EVALUATED-only orders are not_evaluated, not open_findings or complete');
+  {
+    const pc = buildPilotCase({
+      organizationId: 'org-1', orderId: 'order-section-only', view: baseView({
+        orderId: 'order-section-only', orderNumber: 'PO-SECTION',
+        canonicalMaterialLines: [{ id: 'l1', description: 'A', canonicalKey: 'k1', provenanceRefs: ['E1'] }],
+        evidenceReferences: [{ ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' }]
+        // baseView intentionally leaves the 4 *Available flags false.
+      })
+    });
+    const contract = buildDataQualityContract({ organizationId: 'org-1', generatedAt: '2026-01-01T00:00:00.000Z', pilotCases: [pc] });
+    const order = contract.orders[0];
+    assert.ok(contract.findings.length > 0, 'SECTION_NOT_EVALUATED findings must remain visible');
+    assert.ok(contract.findings.every((f) => f.type === 'SECTION_NOT_EVALUATED'), 'this fixture must contain only not-evaluated section findings');
+    assert.strictEqual(order.findingCount, contract.findings.length);
+    assert.strictEqual(order.dataQualityStatus, ORDER_STATUS.NOT_EVALUATED, 'unavailable sections alone mean the assessment is not evaluated');
+    assert.notStrictEqual(order.dataQualityStatus, ORDER_STATUS.COMPLETE, 'complete must not be fabricated when required sections are unavailable');
+    assert.notStrictEqual(order.dataQualityStatus, ORDER_STATUS.OPEN_FINDINGS, 'SECTION_NOT_EVALUATED alone must not imply an order-specific open problem');
+  }
+  console.log('PASS');
+
+  console.log('Regression: genuine evidence gaps and conflicts still produce incomplete_evidence/open_findings');
+  {
+    const evaluatedSections = { unresolvedEvidenceAvailable: true, ambiguousEvidenceAvailable: true, activeCommitmentsAvailable: true, supersededCommitmentsAvailable: true };
+    const incomplete = buildPilotCase({
+      organizationId: 'org-1', orderId: 'order-real-gap', view: baseView({
+        orderId: 'order-real-gap', orderNumber: 'PO-GAP', ...evaluatedSections,
+        canonicalMaterialLines: [
+          { id: 'l1', description: 'A', canonicalKey: 'k1', provenanceRefs: ['E1'] },
+          { id: 'l2', description: 'B', canonicalKey: 'k2', provenanceRefs: [] }
+        ],
+        evidenceReferences: [{ ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' }]
+      })
+    });
+    const conflict = buildPilotCase({
+      organizationId: 'org-1', orderId: 'order-real-conflict', view: baseView({
+        orderId: 'order-real-conflict', orderNumber: 'PO-CONFLICT', ...evaluatedSections,
+        canonicalMaterialLines: [{ id: 'l3', description: 'C', canonicalKey: 'k3', provenanceRefs: ['E1', 'E2'] }],
+        evidenceReferences: [
+          { ref: 'E1', kind: 'line_source', sourceEmailId: 'se-1' },
+          { ref: 'E2', kind: 'line_source', sourceEmailId: 'se-2' }
+        ],
+        safeEvidenceExcerpts: [
+          { ref: 'E1', excerpt: JSON.stringify({ quantity: 10 }) },
+          { ref: 'E2', excerpt: JSON.stringify({ quantity: 12 }) }
+        ]
+      })
+    });
+    const contract = buildDataQualityContract({ organizationId: 'org-1', generatedAt: '2026-01-01T00:00:00.000Z', pilotCases: [incomplete, conflict] });
+    const byId = Object.fromEntries(contract.orders.map((o) => [o.orderId, o]));
+    assert.strictEqual(byId['order-real-gap'].dataQualityStatus, ORDER_STATUS.INCOMPLETE_EVIDENCE);
+    assert.strictEqual(byId['order-real-conflict'].dataQualityStatus, ORDER_STATUS.OPEN_FINDINGS);
   }
   console.log('PASS');
 

@@ -334,6 +334,25 @@ async function run() {
   }
   console.log('PASS');
 
+  console.log('Regression: a candidate that belongs to multiple strata is selected once and remaining slots are filled with other unique orders');
+  {
+    const candidates = [
+      { id: 'overlap', orderCode: 'OVERLAP', lineCount: 5, linesWithEvidence: 5, evidenceRatio: 1, needsReviewLines: 4, overdueOrAttention: true, incompleteOrUnresolved: true },
+      { id: 'low', orderCode: 'LOW', lineCount: 1, linesWithEvidence: 0, evidenceRatio: 0, needsReviewLines: 0, overdueOrAttention: false, incompleteOrUnresolved: true },
+      { id: 'fill-a', orderCode: 'FILL-A', lineCount: 1, linesWithEvidence: 1, evidenceRatio: 0.5, needsReviewLines: 0, overdueOrAttention: false, incompleteOrUnresolved: false },
+      { id: 'fill-b', orderCode: 'FILL-B', lineCount: 1, linesWithEvidence: 1, evidenceRatio: 0.5, needsReviewLines: 0, overdueOrAttention: false, incompleteOrUnresolved: false }
+    ];
+    const { selections } = selectPilotCandidates(candidates, { limit: 4, knownOrderCode: null });
+    const ids = selections.map((s) => s.id);
+    assert.strictEqual(selections.length, 4, 'selection must keep filling the requested limit when unique eligible orders exist');
+    assert.strictEqual(new Set(ids).size, ids.length, 'one order must never occupy multiple pilot-case slots');
+    assert.strictEqual(ids.filter((id) => id === 'overlap').length, 1, 'the multi-strata order must appear exactly once');
+    assert.ok(ids.includes('fill-a'));
+    assert.ok(ids.includes('fill-b'));
+    assert.ok(selections.some((s) => s.stratum === 'unique_fill'), 'unique fill should backfill strata deficits without reusing selected orders');
+  }
+  console.log('PASS');
+
   console.log('Test: the known pilot order is selected as the first slot when present among candidates');
   {
     const candidates = [

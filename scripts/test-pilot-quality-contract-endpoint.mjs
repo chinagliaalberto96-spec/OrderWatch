@@ -49,11 +49,11 @@ function makeCandidateDb({ organizationId, orders = [] }) {
 }
 
 async function runCoreTests() {
-  console.log('Test: getPilotQualityContract() with no orders returns a valid, empty, deterministic v2.2.0 contract');
+  console.log('Test: getPilotQualityContract() with no orders returns a valid, empty, deterministic v2.3.0 contract');
   {
     const { db } = makeCandidateDb({ organizationId: 'org-1', orders: [] });
     const contract = await getPilotQualityContract({ organizationId: 'org-1', reqDb: db });
-    assert.strictEqual(contract.contractVersion, '2.2.0');
+    assert.strictEqual(contract.contractVersion, '2.3.0');
     assert.strictEqual(contract.organizationId, 'org-1');
     assert.deepStrictEqual(contract.orders, []);
     assert.deepStrictEqual(contract.findings, []);
@@ -97,7 +97,7 @@ async function runCoreTests() {
       return [];
     };
     const contract = await getPilotQualityContract({ organizationId: 'org-1', orderId: 'someone-elses-order', reqDb: db });
-    assert.strictEqual(contract.contractVersion, '2.2.0');
+    assert.strictEqual(contract.contractVersion, '2.3.0');
     assert.strictEqual(contract.orders.length, 1, 'the explicitly requested order must still appear once, marked unavailable');
     assert.strictEqual(contract.orders[0].dataQualityStatus, 'unavailable');
     assert.strictEqual(contract.orders[0].orderId, 'someone-elses-order');
@@ -310,7 +310,7 @@ async function runHandlerRoleTests() {
     console.log('PASS');
 
     for (const role of ['Owner', 'IT', 'Admin']) {
-      console.log(`Test: an authorized role (${role}) can access the endpoint and receives a real v2.2.0 contract`);
+      console.log(`Test: an authorized role (${role}) can access the endpoint and receives a real v2.3.0 contract`);
       {
         const mock = installSecureAuthFetchMock({ role });
         try {
@@ -318,7 +318,7 @@ async function runHandlerRoleTests() {
           const response = makeResponse();
           await pilotQualityContractHandler(request, response);
           assert.strictEqual(response.statusCode, 200, `role ${role} must be allowed`);
-          assert.strictEqual(response.body.contractVersion, '2.2.0');
+          assert.strictEqual(response.body.contractVersion, '2.3.0');
           assert.strictEqual(response.body.organizationId, 'org-1');
         } finally {
           mock.restore();

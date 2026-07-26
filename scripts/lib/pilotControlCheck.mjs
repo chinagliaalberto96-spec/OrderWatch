@@ -438,29 +438,39 @@ export function selectPilotCandidates(candidates, { limit = 10, knownOrderCode =
   STRATA.forEach((stratum, idx) => {
     const wanted = perStratumBase + (idx < extra ? 1 : 0);
     const pool = pools[stratum.key].filter((c) => !selectedIds.has(c.id));
-    let picked = pool.slice(0, wanted);
+    const picked = pool.slice(0, wanted);
     if (picked.length < wanted) {
       deficits.push({ stratum: stratum.label, wanted, found: picked.length, reason: "Not enough eligible, not-yet-selected candidates in this stratum." });
-      // Only reuse an already-selected candidate as an explicit last resort,
-      // and only if the whole eligible pool (including already-selected) is
-      // itself smaller than requested — never to pad past genuine scarcity.
-      const fullPool = pools[stratum.key];
-      if (fullPool.length > picked.length) {
-        const reuse = fullPool.filter((c) => !picked.some((p) => p.id === c.id)).slice(0, wanted - picked.length);
-        picked = picked.concat(reuse);
-      }
     }
     for (const c of picked) {
-      const reused = selectedIds.has(c.id);
+      if (selectedIds.has(c.id)) continue;
       selected.push({
         id: c.id,
         orderCode: c.orderCode,
         stratum: stratum.key,
-        reason: `${stratum.label}${reused ? " (reused — insufficient distinct eligible candidates)" : ""}: lines=${c.lineCount}, evidenceRatio=${c.evidenceRatio === null ? "null" : c.evidenceRatio.toFixed(2)}, needsReviewLines=${c.needsReviewLines}, overdueOrAttention=${c.overdueOrAttention}`
+        reason: `${stratum.label}: lines=${c.lineCount}, evidenceRatio=${c.evidenceRatio === null ? "null" : c.evidenceRatio.toFixed(2)}, needsReviewLines=${c.needsReviewLines}, overdueOrAttention=${c.overdueOrAttention}`
       });
       selectedIds.add(c.id);
     }
   });
+
+  if (selected.length < limit) {
+    const fillPool = sortDeterministic(candidates.filter((c) => !selectedIds.has(c.id)), (c) => {
+      const evidenceScore = c.evidenceRatio === null ? 0 : c.evidenceRatio;
+      const missingEvidence = Math.max(0, (c.lineCount || 0) - (c.linesWithEvidence || 0));
+      return (c.overdueOrAttention ? 1000 : 0) + (c.incompleteOrUnresolved ? 500 : 0) + ((c.lineCount || 0) * 10) + missingEvidence + evidenceScore;
+    }, "desc");
+    for (const c of fillPool) {
+      if (selected.length >= limit) break;
+      selected.push({
+        id: c.id,
+        orderCode: c.orderCode,
+        stratum: "unique_fill",
+        reason: `unique-fill: lines=${c.lineCount}, evidenceRatio=${c.evidenceRatio === null ? "null" : c.evidenceRatio.toFixed(2)}, needsReviewLines=${c.needsReviewLines}, overdueOrAttention=${c.overdueOrAttention}`
+      });
+      selectedIds.add(c.id);
+    }
+  }
 
   return { selections: selected.slice(0, limit), deficits };
 }
