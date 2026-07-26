@@ -11,13 +11,26 @@ import { formatDate } from "../utils/dateUtils";
 import { formatNumber, humanizeColumn } from "../utils/formatters";
 import { getOrderStatus } from "../utils/statusRules";
 import { canPrepareSupplierOrderFromLine, isProcurementRequirement } from "../utils/procurement";
+import { investigationContextMatchesOrder, normalizeFindingContext } from "../utils/dataQualityInvestigation";
 
 // Stati che richiedono un intervento del buyer: usati dal filtro "azioni
 // richieste" quando si arriva qui dal KPI della dashboard.
 const ACTION_STATUSES = ["OVERDUE", "CRITICAL", "TO_VERIFY"];
 
-export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, focusOrderId, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate, onPrepareSupplierOrder }) {
-  const [selectedOrder, setSelectedOrder] = useState(null);
+export function resolveFocusedOrder(orders, focusOrderId, focusOrderCode) {
+  if (focusOrderId) return orders.find((order) => order.id === focusOrderId) || null;
+  if (focusOrderCode) return orders.find((order) => order.orderCode === focusOrderCode) || null;
+  return null;
+}
+
+export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, focusOrderId, investigationContext, presetFilter, onClearFilter, onClearOrderDrilldown, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate, onPrepareSupplierOrder }) {
+  const initialOrder = resolveFocusedOrder(orders, focusOrderId, focusOrderCode);
+  const [selectedOrder, setSelectedOrder] = useState(initialOrder);
+  const [selectedInvestigationContext, setSelectedInvestigationContext] = useState(
+    initialOrder && investigationContextMatchesOrder(investigationContext, initialOrder.id)
+      ? normalizeFindingContext(investigationContext)
+      : null
+  );
 
   // Dopo un refresh dei dati (es. update dal pannello) l'ordine selezionato
   // va riagganciato alla riga aggiornata, altrimenti mostra i valori vecchi.
@@ -25,7 +38,10 @@ export default function OrdersView({ config, orders, materialLines = [], pending
     if (!selectedOrder) return;
     const fresh = orders.find((order) => order.id === selectedOrder.id);
     if (fresh && fresh !== selectedOrder) setSelectedOrder(fresh);
-    if (!fresh) setSelectedOrder(null);
+    if (!fresh) {
+      setSelectedOrder(null);
+      setSelectedInvestigationContext(null);
+    }
   }, [orders, selectedOrder]);
 
   const allRows = useMemo(
@@ -64,11 +80,28 @@ export default function OrdersView({ config, orders, materialLines = [], pending
   // di matching quando l'id reale e' gia' noto.
   useEffect(() => {
     if (!focusOrderId && !focusOrderCode) return;
-    const match = focusOrderId
-      ? orders.find((order) => order.id === focusOrderId)
-      : orders.find((order) => order.orderCode === focusOrderCode);
-    if (match) setSelectedOrder(match);
-  }, [focusOrderId, focusOrderCode, orders]);
+    const match = resolveFocusedOrder(orders, focusOrderId, focusOrderCode);
+    if (match) {
+      setSelectedOrder(match);
+      setSelectedInvestigationContext(
+        investigationContextMatchesOrder(investigationContext, match.id)
+          ? normalizeFindingContext(investigationContext)
+          : null
+      );
+    }
+  }, [focusOrderId, focusOrderCode, investigationContext, orders]);
+
+  function openOrderNormally(order) {
+    setSelectedOrder(order);
+    setSelectedInvestigationContext(null);
+    onClearOrderDrilldown?.();
+  }
+
+  function closeOrder() {
+    setSelectedOrder(null);
+    setSelectedInvestigationContext(null);
+    onClearOrderDrilldown?.();
+  }
 
   const columns = config.tableColumns.orders.map((key) => ({
     key,
@@ -133,7 +166,7 @@ export default function OrdersView({ config, orders, materialLines = [], pending
 
         {rows.length ? (
           <Card title={`${config.terminology.ordersPlural} registrati (${rows.length})`}>
-            <DataTable columns={columns} rows={rows} renderCell={renderCell} onRowClick={setSelectedOrder} />
+            <DataTable columns={columns} rows={rows} renderCell={renderCell} onRowClick={openOrderNormally} />
           </Card>
         ) : (
           <OrdersEmptyState
@@ -182,9 +215,10 @@ export default function OrdersView({ config, orders, materialLines = [], pending
       </main>
       <OrderDetailPanel
         order={selectedOrder}
+        investigationContext={selectedInvestigationContext}
         status={selectedOrder ? getOrderStatus(selectedOrder, config.alertRules) : null}
         terminology={config.terminology}
-        onClose={() => setSelectedOrder(null)}
+        onClose={closeOrder}
         onUpdateOrder={onUpdateOrder}
         onDeleteOrder={onDeleteOrder}
         onFetchOrderOperationalView={onFetchOrderOperationalView}

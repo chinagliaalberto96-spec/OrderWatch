@@ -25,7 +25,12 @@ async function loadRealModules() {
   const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
   const ordersView = await server.ssrLoadModule('/src/views/OrdersView.jsx');
   const customerConfig = await server.ssrLoadModule('/src/config/customer.config.js');
-  return { server, OrdersView: ordersView.default, config: customerConfig.default };
+  return {
+    server,
+    OrdersView: ordersView.default,
+    resolveFocusedOrder: ordersView.resolveFocusedOrder,
+    config: customerConfig.default
+  };
 }
 
 function makeOrder(overrides = {}) {
@@ -45,7 +50,7 @@ function makeOrder(overrides = {}) {
 }
 
 async function run() {
-  const { server, OrdersView, config } = await loadRealModules();
+  const { server, OrdersView, resolveFocusedOrder, config } = await loadRealModules();
 
   try {
     console.log('Test: OrdersView resolves the target order by focusOrderId (the stable key), opening OrderDetailPanel for it');
@@ -56,6 +61,56 @@ async function run() {
         h(OrdersView, { config, orders: [other, target], focusOrderId: 'order-abc', onFetchOrderOperationalView: async () => ({}) })
       );
       assert.ok(html.includes('0013545497'), 'expected the order matched by focusOrderId to be opened in the detail panel');
+    }
+    console.log('PASS');
+
+    console.log('Test: OrdersView preserves the full investigation context only for the exact focused order');
+    {
+      const target = makeOrder({ id: 'order-abc', orderCode: '0013545497' });
+      const context = {
+        findingId: 'finding-1',
+        type: 'LINE_WITHOUT_EVIDENCE',
+        dimension: 'traceability',
+        severity: 'warning',
+        orderId: 'order-abc',
+        orderCode: '0013545497',
+        affectedLines: [{ id: 'line-1', description: 'Riga sintetica', itemCode: null }],
+        affectedDocuments: [],
+        evidenceRefs: [],
+        description: 'La riga non presenta evidenza.',
+        recommendedAction: 'Verificare la fonte.'
+      };
+      const html = renderToStaticMarkup(
+        h(OrdersView, {
+          config,
+          orders: [target],
+          focusOrderId: 'order-abc',
+          investigationContext: context,
+          onFetchOrderOperationalView: async () => ({})
+        })
+      );
+      assert.ok(html.includes('Ordine aperto dal controllo qualità'));
+      assert.ok(html.includes('Riga sintetica'));
+
+      const mismatched = renderToStaticMarkup(
+        h(OrdersView, {
+          config,
+          orders: [target],
+          focusOrderId: 'order-abc',
+          investigationContext: { ...context, orderId: 'order-other' },
+          onFetchOrderOperationalView: async () => ({})
+        })
+      );
+      assert.ok(!mismatched.includes('Ordine aperto dal controllo qualità'));
+    }
+    console.log('PASS');
+
+    console.log('Test: stable order resolution is exact and never falls back to a decoy');
+    {
+      const target = makeOrder({ id: 'order-abc', orderCode: '0013545497' });
+      const decoy = makeOrder({ id: 'order-def', orderCode: '0013545497' });
+      assert.strictEqual(resolveFocusedOrder([decoy, target], 'order-abc', null), target);
+      assert.strictEqual(resolveFocusedOrder([target], 'missing-id', '0013545497'), null);
     }
     console.log('PASS');
 
@@ -100,6 +155,8 @@ async function run() {
     assert.ok(handlerMatch, 'expected handleOpenOrderFromFinding to be defined in App.jsx');
     const body = handlerMatch[1];
     assert.ok(/handleNavigate\(\s*["']orders["']/.test(body), 'handleOpenOrderFromFinding must switch to the existing "orders" view (where OrderOperationalView is rendered) via handleNavigate, not a new view/state mechanism');
+    assert.ok(/normalizeFindingContext/.test(body), 'App.jsx must allowlist and preserve the complete finding context');
+    assert.ok(/investigationContext/.test(body), 'App.jsx must store the normalized finding context in the existing drilldown state');
     assert.ok(!/adapter\.getOrderOperationalView|fetch\(/.test(body), 'handleOpenOrderFromFinding must not itself fetch order data — it only switches views');
   }
   console.log('PASS');
@@ -122,6 +179,26 @@ async function run() {
     assert.strictEqual(fetchCallSites.length, 1, 'adapter.getOrderOperationalView must be called from exactly one place in App.jsx (handleFetchOrderOperationalView) — a second call site would mean a duplicate fetch implementation');
     assert.ok(/<OrdersView[\s\S]{0,600}onFetchOrderOperationalView={handleFetchOrderOperationalView}/.test(source), 'OrdersView must still receive the existing handleFetchOrderOperationalView callback unchanged');
     assert.ok(/<OrdersView[\s\S]{0,400}focusOrderId={drilldown\.orderId}/.test(source), 'OrdersView must receive the new focusOrderId drilldown value so orderId-based navigation resolves the right order');
+    assert.ok(/<OrdersView[\s\S]{0,500}investigationContext={drilldown\.investigationContext}/.test(source), 'OrdersView must receive the normalized investigation context');
+    assert.ok(/onClearOrderDrilldown={handleClearOrderDrilldown}/.test(source), 'OrdersView must be able to clear stale drilldown context on close or normal navigation');
+  }
+  console.log('PASS');
+
+  console.log('Test: leaving the orders view clears stale Data Quality context');
+  {
+    const source = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+    assert.ok(/activeView !== ["']orders["'] && drilldown\.investigationContext/.test(source));
+    assert.ok(/setDrilldown\(\{\}\)/.test(source));
+  }
+  console.log('PASS');
+
+  console.log('Test: normal row navigation and panel close clear investigation context before reuse');
+  {
+    const source = await readFile(new URL('../src/views/OrdersView.jsx', import.meta.url), 'utf8');
+    assert.ok(/function openOrderNormally[\s\S]*setSelectedInvestigationContext\(null\)[\s\S]*onClearOrderDrilldown/.test(source));
+    assert.ok(/function closeOrder[\s\S]*setSelectedInvestigationContext\(null\)[\s\S]*onClearOrderDrilldown/.test(source));
+    assert.ok(/onRowClick={openOrderNormally}/.test(source));
+    assert.ok(/onClose={closeOrder}/.test(source));
   }
   console.log('PASS');
 

@@ -232,9 +232,15 @@ async function run() {
       assert.strictEqual(orderId, finding.orderId, 'the emitted orderId must be exactly the finding\'s real orderId, the stable navigation key');
       assert.strictEqual(context.findingId, finding.findingId);
       assert.strictEqual(context.type, finding.type);
+      assert.strictEqual(context.dimension, finding.dimension);
+      assert.strictEqual(context.severity, finding.severity);
+      assert.strictEqual(context.orderId, finding.orderId);
       assert.strictEqual(context.orderCode, finding.orderCode || null);
       assert.deepStrictEqual(context.affectedLines, finding.affectedLines || []);
       assert.deepStrictEqual(context.affectedDocuments, finding.affectedDocuments || []);
+      assert.deepStrictEqual(context.evidenceRefs, finding.evidenceRefs || []);
+      assert.strictEqual(context.description, finding.description || null);
+      assert.strictEqual(context.recommendedAction, finding.recommendedAction || null);
     }
     console.log('PASS');
 

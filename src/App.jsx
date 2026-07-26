@@ -29,6 +29,7 @@ import PasswordResetView from "./views/PasswordResetView";
 import { getWorkflowPolicy } from "./config/workflowModes";
 import { canAccessView, canWriteOperationalData } from "./utils/permissions";
 import { createSafeLanguagePolicy } from "./utils/safeLanguage";
+import { normalizeFindingContext } from "./utils/dataQualityInvestigation";
 
 const viewLabels = (terminology) => ({
   dashboard: "Oggi",
@@ -360,6 +361,10 @@ export default function App() {
     if (!navItems.some((item) => item.key === activeView)) setActiveView("dashboard");
   }, [navItems, activeView]);
 
+  useEffect(() => {
+    if (activeView !== "orders" && drilldown.investigationContext) setDrilldown({});
+  }, [activeView, drilldown.investigationContext]);
+
   const currentTitle = labels[activeView] || config.product.name;
 
   function handleNavigate(view, context = {}) {
@@ -380,11 +385,26 @@ export default function App() {
   // OrderDetailPanel -> OrderOperationalView -> handleFetchOrderOperationalView
   // -> adapter.getOrderOperationalView), which independently enforces tenant
   // isolation server-side — a client-side orderId here never grants access
-  // by itself. `context` (findingId/type/affectedLines/affectedDocuments) is
-  // accepted but currently unused beyond order-level navigation; see the
-  // limitation documented in PilotDataQualityView.jsx.
+  // by itself. The finding context is an allowlisted read-only snapshot used
+  // only to explain and focus the investigation in the existing detail view.
   function handleOpenOrderFromFinding(orderId, context = {}) {
-    handleNavigate("orders", { orderId, orderCode: context.orderCode || null });
+    const investigationContext = normalizeFindingContext({ ...context, orderId });
+    if (!investigationContext) return;
+    handleNavigate("orders", {
+      orderId,
+      orderCode: investigationContext.orderCode || null,
+      investigationContext
+    });
+  }
+
+  function handleClearOrderDrilldown() {
+    setDrilldown((current) => {
+      const next = { ...current };
+      delete next.orderId;
+      delete next.orderCode;
+      delete next.investigationContext;
+      return next;
+    });
   }
 
   function handleSelectReviewItem(item) {
@@ -752,8 +772,10 @@ export default function App() {
               orders={filteredData.orders}
               focusOrderCode={drilldown.orderCode}
               focusOrderId={drilldown.orderId}
+              investigationContext={drilldown.investigationContext}
               presetFilter={drilldown.ordersFilter}
               onClearFilter={() => setDrilldown({})}
+              onClearOrderDrilldown={handleClearOrderDrilldown}
               onUpdateOrder={handleUpdateOrder}
               onDeleteOrder={handleDeleteOrder}
               onFetchOrderOperationalView={handleFetchOrderOperationalView}

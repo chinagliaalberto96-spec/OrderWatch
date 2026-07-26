@@ -1,5 +1,6 @@
 import React, { useEffect, useReducer, useRef } from 'react';
 import { formatDate } from '../utils/dateUtils';
+import { isExactIdFocused, normalizeFocusIds, resolveExistingEvidenceRefs } from '../utils/dataQualityInvestigation';
 
 /* ============================================================
  * Pure state machine — no React, no fetch. Directly testable.
@@ -245,7 +246,7 @@ function buildEvidenceGroups(evidenceReferences, linkedDocuments, safeEvidenceEx
   return Array.from(groups.values());
 }
 
-function EvidenceGroupRow({ group }) {
+function EvidenceGroupRow({ group, focusedEvidenceRefs = [] }) {
   const refsLabel = group.items.map((it) => it.ref).join(', ');
   const sourceLabel = group.source.title || group.source.kindLabel;
   return (
@@ -262,15 +263,29 @@ function EvidenceGroupRow({ group }) {
         ) : null}
       </summary>
       <div className="mt-2 space-y-2">
-        {group.items.map((it) => (
-          <div key={it.ref} id={evidenceAnchorId(it.ref)} tabIndex={-1} className="border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
+        {group.items.map((it) => {
+          const focused = focusedEvidenceRefs.includes(it.ref);
+          return (
+          <div
+            key={it.ref}
+            id={evidenceAnchorId(it.ref)}
+            tabIndex={-1}
+            aria-label={focused ? 'Evidenza coinvolta nella segnalazione di qualità dati' : undefined}
+            data-investigation-focus={focused ? 'evidence' : undefined}
+            className="border-t pt-2"
+            style={{
+              borderColor: 'var(--color-border)',
+              backgroundColor: focused ? 'color-mix(in srgb, var(--color-warning) 7%, transparent)' : undefined
+            }}
+          >
             <div className="text-xs font-semibold">
               {it.ref}
               {it.sourceLineNumber ? ` · Riga ${it.sourceLineNumber}` : ''}
             </div>
             <SafeExcerptFields excerpt={it.excerpt} />
           </div>
-        ))}
+          );
+        })}
       </div>
     </details>
   );
@@ -404,7 +419,7 @@ function AdvancedVerificationSections({ data }) {
   );
 }
 
-export function OrderOperationalViewContent({ status, error, data }) {
+export function OrderOperationalViewContent({ status, error, data, lineFocusIds = [], documentFocusIds = [], evidenceFocusRefs = [] }) {
   if (status === 'loading') {
     return (
       <div role="status" aria-live="polite" className="py-3 px-2 text-sm">
@@ -435,11 +450,29 @@ export function OrderOperationalViewContent({ status, error, data }) {
   const safeEvidenceExcerpts = Array.isArray(d.safeEvidenceExcerpts) ? d.safeEvidenceExcerpts : [];
   const linkedDocuments = Array.isArray(d.linkedDocuments) ? d.linkedDocuments : [];
   const evidenceGroups = buildEvidenceGroups(evidenceReferences, linkedDocuments, safeEvidenceExcerpts);
+  const normalizedLineFocusIds = normalizeFocusIds(lineFocusIds);
+  const normalizedDocumentFocusIds = normalizeFocusIds(documentFocusIds);
+  const matchingEvidenceRefs = resolveExistingEvidenceRefs(evidenceFocusRefs, evidenceReferences);
   const levelInfo = operationalLevelDisplay(d.currentObservedSituation);
 
   return (
     <div className="space-y-4">
       <h2 className="text-sm font-bold">Vista operativa</h2>
+
+      {matchingEvidenceRefs.length > 0 && (
+        <nav aria-label="Evidenze rilevanti per la segnalazione" className="flex flex-wrap gap-2">
+          {matchingEvidenceRefs.map((ref, index) => (
+            <a
+              key={ref}
+              href={`#${evidenceAnchorId(ref)}`}
+              className="text-xs font-semibold underline underline-offset-2"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              {matchingEvidenceRefs.length === 1 ? "Vai all'evidenza" : `Vai all'evidenza ${index + 1}`}
+            </a>
+          ))}
+        </nav>
+      )}
 
       {attention.length > 0 && (
         <section aria-labelledby="ooview-attention">
@@ -504,8 +537,15 @@ export function OrderOperationalViewContent({ status, error, data }) {
                 </tr>
               </thead>
               <tbody>
-                {lines.map((ln) => (
-                  <tr key={ln.id}>
+                {lines.map((ln) => {
+                  const focused = isExactIdFocused(ln, normalizedLineFocusIds);
+                  return (
+                  <tr
+                    key={ln.id}
+                    aria-label={focused ? 'Riga coinvolta nella segnalazione di qualità dati' : undefined}
+                    data-investigation-focus={focused ? 'line' : undefined}
+                    style={{ backgroundColor: focused ? 'color-mix(in srgb, var(--color-warning) 9%, transparent)' : undefined }}
+                  >
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.description || 'Riga'}</td>
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.quantity ?? 'Non disponibile'}</td>
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.status || 'Non disponibile'}</td>
@@ -513,7 +553,8 @@ export function OrderOperationalViewContent({ status, error, data }) {
                       <ProvenanceRefs refs={ln.provenanceRefs} evidenceReferences={evidenceReferences} />
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -526,7 +567,7 @@ export function OrderOperationalViewContent({ status, error, data }) {
         <h3 id="ooview-evidence" className="text-sm font-semibold">Evidenza</h3>
         {evidenceGroups.length ? (
           <div className="mt-2 space-y-2">
-            {evidenceGroups.map((g) => <EvidenceGroupRow key={g.key} group={g} />)}
+            {evidenceGroups.map((g) => <EvidenceGroupRow key={g.key} group={g} focusedEvidenceRefs={matchingEvidenceRefs} />)}
           </div>
         ) : (
           <div className="mt-2 text-sm text-[color:var(--color-text-muted)]">Nessuna evidenza disponibile</div>
@@ -537,8 +578,19 @@ export function OrderOperationalViewContent({ status, error, data }) {
         <h3 id="ooview-documents" className="text-sm font-semibold">Documenti collegati</h3>
         {linkedDocuments.length ? (
           <ul className="mt-2 space-y-2 text-sm" aria-label="Documenti collegati">
-            {linkedDocuments.map((doc) => (
-              <li key={doc.id} className="rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }}>
+            {linkedDocuments.map((doc) => {
+              const focused = isExactIdFocused(doc, normalizedDocumentFocusIds);
+              return (
+              <li
+                key={doc.id}
+                aria-label={focused ? 'Documento coinvolto nella segnalazione di qualità dati' : undefined}
+                data-investigation-focus={focused ? 'document' : undefined}
+                className="rounded-md border p-2"
+                style={{
+                  borderColor: focused ? 'color-mix(in srgb, var(--color-warning) 42%, var(--color-border))' : 'var(--color-border)',
+                  backgroundColor: focused ? 'color-mix(in srgb, var(--color-warning) 9%, transparent)' : undefined
+                }}
+              >
                 <div className="text-xs font-semibold uppercase tracking-wide text-[color:var(--color-text-muted)]">{humanDocKind(doc.kind)}</div>
                 {/* doc.number is real source content (e.g. an email subject) and is
                     rendered verbatim as plain text — never prefixed with a technical
@@ -549,7 +601,8 @@ export function OrderOperationalViewContent({ status, error, data }) {
                   {doc.status ? ` · ${doc.status}` : ''}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         ) : (
           <div className="mt-2 text-sm text-[color:var(--color-text-muted)]">Nessun documento collegato</div>
@@ -583,7 +636,14 @@ export function OrderOperationalViewContent({ status, error, data }) {
 // authenticated `adapter` through OrdersView -> OrderDetailPanel (the same
 // path onUpdateOrder/onDeleteOrder already use). `fetchOverride` exists only
 // for tests, so they can inject a fake without touching the production path.
-export default function OrderOperationalView({ orderId, fetchOperationalView, fetchOverride }) {
+export default function OrderOperationalView({
+  orderId,
+  fetchOperationalView,
+  fetchOverride,
+  lineFocusIds = [],
+  documentFocusIds = [],
+  evidenceFocusRefs = []
+}) {
   const fetchFn = fetchOverride || fetchOperationalView;
   const [state, dispatch] = useReducer(orderOperationalViewReducer, initialOrderOperationalViewState);
   const tokenRef = useRef(0);
@@ -613,5 +673,14 @@ export default function OrderOperationalView({ orderId, fetchOperationalView, fe
   }, [orderId, fetchFn]);
 
   if (!orderId) return null;
-  return <OrderOperationalViewContent status={state.status} error={state.error} data={state.data} />;
+  return (
+    <OrderOperationalViewContent
+      status={state.status}
+      error={state.error}
+      data={state.data}
+      lineFocusIds={lineFocusIds}
+      documentFocusIds={documentFocusIds}
+      evidenceFocusRefs={evidenceFocusRefs}
+    />
+  );
 }

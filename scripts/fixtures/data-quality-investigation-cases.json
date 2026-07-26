@@ -1,0 +1,190 @@
+{
+  "fixtureVersion": "1.0.0",
+  "synthetic": true,
+  "cases": [
+    {
+      "caseId": "complete-order",
+      "finding": null,
+      "expected": {
+        "banner": false,
+        "lineFocusIds": [],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": []
+      }
+    },
+    {
+      "caseId": "missing-evidence",
+      "finding": {
+        "findingId": "finding-missing-evidence",
+        "type": "LINE_WITHOUT_EVIDENCE",
+        "dimension": "traceability",
+        "severity": "warning",
+        "orderId": "order-fixture-1",
+        "orderCode": "PO-FIXTURE-001",
+        "affectedLines": [
+          {
+            "id": "line-fixture-a",
+            "description": "Profilato sintetico",
+            "itemCode": "ITEM-A"
+          }
+        ],
+        "affectedDocuments": [],
+        "evidenceRefs": [],
+        "description": "La riga non presenta riferimenti a una fonte disponibile.",
+        "recommendedAction": "Verificare la riga rispetto alla comunicazione o al documento sorgente."
+      },
+      "expected": {
+        "banner": true,
+        "lineFocusIds": ["line-fixture-a"],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": []
+      }
+    },
+    {
+      "caseId": "quantity-conflict",
+      "finding": {
+        "findingId": "finding-quantity-conflict",
+        "type": "QUANTITY_CONFLICT",
+        "dimension": "missingOrAmbiguous",
+        "severity": "warning",
+        "orderId": "order-fixture-2",
+        "orderCode": "PO-FIXTURE-002",
+        "affectedLines": [
+          {
+            "id": "line-fixture-b",
+            "description": "Pannello sintetico",
+            "itemCode": "ITEM-B"
+          }
+        ],
+        "affectedDocuments": [],
+        "evidenceRefs": ["E-FIXTURE-1", "E-FIXTURE-2"],
+        "description": "Le fonti disponibili riportano quantità differenti.",
+        "recommendedAction": "Confrontare le fonti prima di utilizzare la quantità."
+      },
+      "expected": {
+        "banner": true,
+        "lineFocusIds": ["line-fixture-b"],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": ["E-FIXTURE-1", "E-FIXTURE-2"]
+      }
+    },
+    {
+      "caseId": "date-conflict",
+      "finding": {
+        "findingId": "finding-date-conflict",
+        "type": "DATE_CONFLICT",
+        "dimension": "missingOrAmbiguous",
+        "severity": "warning",
+        "orderId": "order-fixture-3",
+        "orderCode": "PO-FIXTURE-003",
+        "affectedLines": [
+          {
+            "id": "line-fixture-c",
+            "description": "Supporto sintetico",
+            "itemCode": null
+          }
+        ],
+        "affectedDocuments": [],
+        "evidenceRefs": ["E-FIXTURE-3", "E-FIXTURE-4"],
+        "description": "Le fonti disponibili riportano date differenti.",
+        "recommendedAction": "Confrontare le date presenti nelle fonti collegate."
+      },
+      "expected": {
+        "banner": true,
+        "lineFocusIds": ["line-fixture-c"],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": ["E-FIXTURE-3", "E-FIXTURE-4"]
+      }
+    },
+    {
+      "caseId": "unlinked-document",
+      "finding": {
+        "findingId": "finding-unlinked-document",
+        "type": "DOCUMENT_LINK_UNPROVEN",
+        "dimension": "linking",
+        "severity": "warning",
+        "orderId": "order-fixture-4",
+        "orderCode": "PO-FIXTURE-004",
+        "affectedLines": [],
+        "affectedDocuments": [
+          {
+            "id": "document-fixture-a",
+            "kind": "delivery_note",
+            "number": "DDT-FIXTURE-001"
+          }
+        ],
+        "evidenceRefs": ["E-FIXTURE-5"],
+        "description": "Il documento è disponibile senza un collegamento confermato.",
+        "recommendedAction": "Verificare il riferimento ordine nel documento."
+      },
+      "expected": {
+        "banner": true,
+        "lineFocusIds": [],
+        "documentFocusIds": ["document-fixture-a"],
+        "evidenceFocusRefs": ["E-FIXTURE-5"]
+      }
+    },
+    {
+      "caseId": "organization-source-incomplete",
+      "finding": {
+        "findingId": "organization-source-incomplete",
+        "type": "SOURCE_INCOMPLETE",
+        "dimension": "availability",
+        "severity": "info",
+        "organizationId": "organization-fixture",
+        "description": "Una fonte organizzativa non è disponibile.",
+        "recommendedAction": "Verificare la copertura della fonte."
+      },
+      "expected": {
+        "banner": false,
+        "lineFocusIds": [],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": []
+      }
+    },
+    {
+      "caseId": "operational-state-unexplained",
+      "finding": {
+        "findingId": "finding-operational-state",
+        "type": "OPERATIONAL_STATE_UNEXPLAINED",
+        "dimension": "missingOrAmbiguous",
+        "severity": "warning",
+        "orderId": "order-fixture-5",
+        "orderCode": "PO-FIXTURE-005",
+        "affectedLines": [],
+        "affectedDocuments": [],
+        "evidenceRefs": ["E-FIXTURE-6"],
+        "description": "Lo stato operativo non è spiegato dalle fonti attualmente collegate.",
+        "recommendedAction": "Controllare date, documenti e comunicazioni recenti."
+      },
+      "expected": {
+        "banner": true,
+        "lineFocusIds": [],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": ["E-FIXTURE-6"]
+      }
+    },
+    {
+      "caseId": "section-not-evaluated",
+      "finding": {
+        "findingId": "finding-section-not-evaluated",
+        "type": "SECTION_NOT_EVALUATED",
+        "dimension": "availability",
+        "severity": "info",
+        "orderId": "order-fixture-6",
+        "orderCode": "PO-FIXTURE-006",
+        "affectedLines": [],
+        "affectedDocuments": [],
+        "evidenceRefs": [],
+        "description": "La sezione non è stata valutata con le fonti disponibili.",
+        "recommendedAction": "Considerare il limite della verifica prima di concludere l'analisi."
+      },
+      "expected": {
+        "banner": true,
+        "lineFocusIds": [],
+        "documentFocusIds": [],
+        "evidenceFocusRefs": []
+      }
+    }
+  ]
+}

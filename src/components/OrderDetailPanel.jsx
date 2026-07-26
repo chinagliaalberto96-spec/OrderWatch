@@ -4,11 +4,52 @@ import { formatDate } from "../utils/dateUtils";
 import StatusBadge from "./StatusBadge";
 import Button from "./Button";
 import OrderOperationalView from "./OrderOperationalView";
+import { buildInvestigationBannerModel, normalizeFocusIds } from "../utils/dataQualityInvestigation";
 
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
 const BUYER_STATUSES = ["In attesa", "Confermato", "Ricevuto", "Annullato"];
 
-export default function OrderDetailPanel({ order, status, terminology, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate }) {
+export function InvestigationBanner({ context }) {
+  const model = buildInvestigationBannerModel(context);
+  if (!model) return null;
+
+  return (
+    <section
+      aria-label="Ordine aperto dal controllo qualità"
+      className="rounded-md border p-3"
+      style={{
+        borderColor: "color-mix(in srgb, var(--color-warning) 36%, var(--color-border))",
+        backgroundColor: "color-mix(in srgb, var(--color-warning) 7%, white)"
+      }}
+    >
+      <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--color-warning)" }}>
+        {model.label}
+      </div>
+      <h2 className="mt-1 text-sm font-semibold">{model.findingLabel}</h2>
+      {model.affectedLineSummaries.length > 0 && (
+        <p className="mt-2 text-xs">
+          <span className="font-semibold">Righe interessate:</span> {model.affectedLineSummaries.join("; ")}
+        </p>
+      )}
+      {model.affectedDocumentSummaries.length > 0 && (
+        <p className="mt-1 text-xs">
+          <span className="font-semibold">Documenti interessati:</span> {model.affectedDocumentSummaries.join("; ")}
+        </p>
+      )}
+      {model.description && <p className="mt-2 text-sm">{model.description}</p>}
+      {model.recommendedAction && (
+        <p className="mt-2 text-sm">
+          <span className="font-semibold">Verifica consigliata:</span> {model.recommendedAction}
+        </p>
+      )}
+      <p className="mt-2 text-sm" style={{ color: "var(--color-text-muted)" }}>
+        <span className="font-semibold">Cosa OrderWatch non può confermare:</span> {model.cannotConfirm}
+      </p>
+    </section>
+  );
+}
+
+export default function OrderDetailPanel({ order, status, terminology, investigationContext, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -104,12 +145,19 @@ export default function OrderDetailPanel({ order, status, terminology, onClose, 
       </div>
       <div className="space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-124px)]">
         <StatusBadge status={status} />
+        <InvestigationBanner context={investigationContext} />
 
         {/* Operational view integration. fetchOperationalView is the same
             authenticated `adapter` instance as onUpdateOrder/onDeleteOrder
             above (threaded from App.jsx), not a separate/unauthenticated one. */}
         <div className="mt-3">
-          <OrderOperationalView orderId={order?.id} fetchOperationalView={onFetchOrderOperationalView} />
+          <OrderOperationalView
+            orderId={order?.id}
+            fetchOperationalView={onFetchOrderOperationalView}
+            lineFocusIds={normalizeFocusIds(investigationContext?.affectedLines)}
+            documentFocusIds={normalizeFocusIds(investigationContext?.affectedDocuments)}
+            evidenceFocusRefs={investigationContext?.evidenceRefs || []}
+          />
         </div>
 
         {!editing && (

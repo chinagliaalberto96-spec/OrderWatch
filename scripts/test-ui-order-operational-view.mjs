@@ -62,6 +62,35 @@ async function run() {
     OrderOperationalViewContent
   } = view;
   const { createApiAdapter } = adapter;
+  const { InvestigationBanner } = panel;
+  const focusData = {
+    orderId: 'order-focus',
+    orderNumber: 'PO-FOCUS',
+    summary: {},
+    currentObservedSituation: { severity: 'ok', label: null, reasonCodes: [], asOf: null },
+    resolvedSupplierOrganization: null,
+    resolvedSupplierContact: null,
+    canonicalMaterialLines: [
+      { id: 'line-1', description: 'Item A', quantity: 10, status: 'open', provenanceRefs: ['E1'] },
+      { id: 'line-2', description: 'Item B', quantity: 5, status: 'open', provenanceRefs: ['E2'] }
+    ],
+    evidenceReferences: [
+      { ref: 'E1', kind: 'line_source', sourceEmailId: 'source-1' },
+      { ref: 'E2', kind: 'line_source', sourceEmailId: 'source-2' }
+    ],
+    safeEvidenceExcerpts: [],
+    linkedDocuments: [],
+    anomaliesAndAttention: [],
+    unresolvedEvidence: [],
+    unresolvedEvidenceAvailable: false,
+    ambiguousEvidence: [],
+    ambiguousEvidenceAvailable: false,
+    activeCommitments: [],
+    activeCommitmentsAvailable: false,
+    supersededCommitments: [],
+    supersededCommitmentsAvailable: false,
+    coverageAndSyncHealth: {}
+  };
 
   try {
     /* ---------------------------------------------------------------- *
@@ -81,6 +110,99 @@ async function run() {
           assert.strictEqual(calls[0].options.headers.Authorization, `Bearer ${FAKE_TOKEN}`);
         }
       );
+    }
+    console.log('PASS');
+
+    console.log('Test: exact line focus highlights only the stable matching line id');
+    {
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, {
+        status: 'loaded',
+        error: null,
+        data: focusData,
+        lineFocusIds: ['line-2']
+      }));
+      assert.strictEqual((html.match(/data-investigation-focus="line"/g) || []).length, 1);
+      const focusedRow = html.match(/<tr[^>]*data-investigation-focus="line"[\s\S]*?<\/tr>/)?.[0] || '';
+      assert.ok(focusedRow.includes('Item B'));
+      assert.ok(!focusedRow.includes('Item A'));
+    }
+    console.log('PASS');
+
+    console.log('Test: stale line/document ids never focus a different entity');
+    {
+      const data = {
+        ...focusData,
+        linkedDocuments: [{ id: 'document-1', kind: 'delivery_note', number: 'DDT-FIXTURE', status: null, receivedAt: null }]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, {
+        status: 'loaded',
+        error: null,
+        data,
+        lineFocusIds: ['missing-line'],
+        documentFocusIds: ['missing-document']
+      }));
+      assert.ok(!html.includes('data-investigation-focus="line"'));
+      assert.ok(!html.includes('data-investigation-focus="document"'));
+    }
+    console.log('PASS');
+
+    console.log('Test: exact document focus highlights only the matching linked document');
+    {
+      const data = {
+        ...focusData,
+        linkedDocuments: [
+          { id: 'document-1', kind: 'delivery_note', number: 'DDT-ONE', status: null, receivedAt: null },
+          { id: 'document-2', kind: 'invoice', number: 'INV-TWO', status: null, receivedAt: null }
+        ]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, {
+        status: 'loaded',
+        error: null,
+        data,
+        documentFocusIds: ['document-2']
+      }));
+      assert.strictEqual((html.match(/data-investigation-focus="document"/g) || []).length, 1);
+      const focusedDocument = html.match(/<li[^>]*data-investigation-focus="document"[\s\S]*?<\/li>/)?.[0] || '';
+      assert.ok(focusedDocument.includes('INV-TWO'));
+      assert.ok(!focusedDocument.includes('DDT-ONE'));
+    }
+    console.log('PASS');
+
+    console.log('Test: evidence navigation uses only exact existing refs and stale refs are omitted');
+    {
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, {
+        status: 'loaded',
+        error: null,
+        data: focusData,
+        evidenceFocusRefs: ['E2', 'E-STALE']
+      }));
+      assert.ok(html.includes('Vai all&#x27;evidenza'));
+      assert.ok(html.includes('href="#evidence-E2"'));
+      assert.ok(html.includes('data-investigation-focus="evidence"'));
+      assert.ok(!html.includes('href="#evidence-E-STALE"'));
+    }
+    console.log('PASS');
+
+    console.log('Test: investigation banner uses fixed factual language and never exposes technical ids');
+    {
+      const context = {
+        findingId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        type: 'QUANTITY_CONFLICT',
+        dimension: 'missingOrAmbiguous',
+        severity: 'warning',
+        orderId: '11111111-2222-4333-8444-555555555555',
+        orderCode: 'PO-FIXTURE',
+        affectedLines: [{ id: '66666666-7777-4888-8999-000000000000', description: 'Riga sintetica', itemCode: null }],
+        affectedDocuments: [],
+        evidenceRefs: ['E1', 'E2'],
+        description: 'Le fonti disponibili riportano quantità differenti.',
+        recommendedAction: 'Confrontare le fonti.'
+      };
+      const html = renderToStaticMarkup(h(InvestigationBanner, { context }));
+      assert.ok(html.includes('Ordine aperto dal controllo qualità'));
+      assert.ok(html.includes('non determina quale valore sia corretto'));
+      assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(html));
+      assert.strictEqual(renderToStaticMarkup(h(InvestigationBanner, { context: null })), '');
     }
     console.log('PASS');
 
@@ -199,6 +321,9 @@ async function run() {
 
       const panelSource = await readFile(new URL('../src/components/OrderDetailPanel.jsx', import.meta.url), 'utf8');
       assert.ok(panelSource.includes('fetchOperationalView={onFetchOrderOperationalView}'), 'OrderDetailPanel must forward the authenticated handler, not construct its own client');
+      assert.ok(panelSource.includes('lineFocusIds={normalizeFocusIds(investigationContext?.affectedLines)}'), 'OrderDetailPanel must pass exact affected line ids');
+      assert.ok(panelSource.includes('documentFocusIds={normalizeFocusIds(investigationContext?.affectedDocuments)}'), 'OrderDetailPanel must pass exact affected document ids');
+      assert.ok(panelSource.includes('evidenceFocusRefs={investigationContext?.evidenceRefs || []}'), 'OrderDetailPanel must pass exact evidence refs');
     }
     console.log('PASS');
 

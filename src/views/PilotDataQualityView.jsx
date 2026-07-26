@@ -158,15 +158,11 @@ const ORDER_COLUMNS = [
 // action. `onOpenOrder` is optional so this component still renders
 // correctly wherever it's used without navigation wired up (e.g. tests).
 //
-// Scope limitation, deliberate: `context` also carries findingId/type/
-// affectedLines/affectedDocuments, but OrderOperationalView has no
-// line/document highlighting today (src/components/OrderOperationalView.jsx)
-// and affectedLines/affectedDocuments here are bare id arrays with no
-// description (dataQualityContract.mjs#buildFindings). Adding highlighting
-// would need either a second order-fetch path or a new backend query just to
-// resolve those ids — both out of scope. This action is order-level
-// navigation only; `context` is passed through for a future, separately
-// reviewed highlighting feature, not consumed today.
+// `affectedLines` and `affectedDocuments` are structured summaries produced
+// by dataQualityContract.mjs: lines contain id/description/itemCode and
+// documents contain id/kind/number. Their stable ids are carried unchanged
+// through the existing order drilldown so OrderOperationalView can focus only
+// exact matches in the already-loaded response, without another query.
 //
 // Extracted as a pure function (not inlined in the onClick) so the exact
 // payload a click produces is directly testable without simulating a real
@@ -181,9 +177,15 @@ export function buildOpenOrderInvocation(finding, onOpenOrder) {
     {
       findingId: finding.findingId,
       type: finding.type,
+      dimension: finding.dimension,
+      severity: finding.severity,
+      orderId: finding.orderId,
       orderCode: finding.orderCode || null,
       affectedLines: finding.affectedLines || [],
-      affectedDocuments: finding.affectedDocuments || []
+      affectedDocuments: finding.affectedDocuments || [],
+      evidenceRefs: finding.evidenceRefs || [],
+      description: finding.description || null,
+      recommendedAction: finding.recommendedAction || null
     }
   ];
 }
