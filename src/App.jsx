@@ -779,6 +779,8 @@ export default function App() {
               onUpdateOrder={handleUpdateOrder}
               onDeleteOrder={handleDeleteOrder}
               onFetchOrderOperationalView={handleFetchOrderOperationalView}
+              onFetchPilotQualityContract={handleFetchPilotQualityContract}
+              currentUserRole={sessionUser?.role}
               materialLines={filteredData.materialLines || []}
               materialLineRevisions={data.materialLineRevisions || []}
               pendingDeliveryNotesCount={(data.deliveryNotes || []).filter((note) => note.needsReview).length}

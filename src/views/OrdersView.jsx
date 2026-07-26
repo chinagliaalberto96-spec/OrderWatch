@@ -23,7 +23,7 @@ export function resolveFocusedOrder(orders, focusOrderId, focusOrderCode) {
   return null;
 }
 
-export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, focusOrderId, investigationContext, presetFilter, onClearFilter, onClearOrderDrilldown, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate, onPrepareSupplierOrder }) {
+export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, focusOrderId, investigationContext, presetFilter, onClearFilter, onClearOrderDrilldown, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onFetchPilotQualityContract, currentUserRole, onNavigate, onPrepareSupplierOrder }) {
   const initialOrder = resolveFocusedOrder(orders, focusOrderId, focusOrderCode);
   const [selectedOrder, setSelectedOrder] = useState(initialOrder);
   const [selectedInvestigationContext, setSelectedInvestigationContext] = useState(
@@ -222,6 +222,8 @@ export default function OrdersView({ config, orders, materialLines = [], pending
         onUpdateOrder={onUpdateOrder}
         onDeleteOrder={onDeleteOrder}
         onFetchOrderOperationalView={onFetchOrderOperationalView}
+        onFetchPilotQualityContract={onFetchPilotQualityContract}
+        currentUserRole={currentUserRole}
         onNavigate={onNavigate}
       />
     </div>

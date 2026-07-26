@@ -152,10 +152,10 @@ mai il contrario.
 ### 4.1 Situazione combinata — albero di decisione (valutato in ordine, prima condizione vera vince)
 
 ```
-1. se la valutazione qualità dati non è ottenibile
+1. se businessStatus == 'CLOSED'                          → CHIUSO
+2. se businessStatus == 'TO_VERIFY'                       → DA_VERIFICARE
+3. se la valutazione qualità dati non è ottenibile
    (errore, permesso negato, o risultato assente)         → VALUTAZIONE_QUALITA_NON_DISPONIBILE
-2. se businessStatus == 'CLOSED'                          → CHIUSO
-3. se businessStatus == 'TO_VERIFY'                       → DA_VERIFICARE
 4. se businessStatus in {OVERDUE, CRITICAL}:
    4a. se dataQualityStatus in {incomplete_evidence, open_findings}
                                                            → URGENZA_OPERATIVA_DATI_DA_VERIFICARE
@@ -169,10 +169,14 @@ mai il contrario.
 ```
 
 Nessuna condizione è un giudizio: ogni ramo legge solo i due stati già calcolati altrove.
-`CLOSED`/`TO_VERIFY` hanno priorità sull'asse qualità dati perché sono condizioni sull'ordine
-stesso. La condizione 1 ha priorità assoluta perché, se la valutazione qualità dati non è
-disponibile, i rami 4/5 non sarebbero comunque calcolabili — ma lo stato operativo (badge separato,
-§6) resta sempre visibile indipendentemente da questa condizione.
+Lo stato operativo resta autorevole e sempre visibile. `CLOSED` e `TO_VERIFY` hanno priorità
+sull'indisponibilità della valutazione qualità perché descrivono una condizione operativa già
+determinata dell'ordine: la mancanza della valutazione qualità non deve nascondere che l'ordine è
+chiuso o che richiede verifica. In questi due casi il codice situazione resta rispettivamente
+`CHIUSO` o `DA_VERIFICARE`, mentre il badge qualità separato (§6) può continuare a comunicare che
+la valutazione qualità non è disponibile. Per gli altri stati operativi, se la valutazione qualità
+non è ottenibile, i rami 4/5 non sono calcolabili e si usa
+`VALUTAZIONE_QUALITA_NON_DISPONIBILE`. Non viene introdotto alcun nuovo codice situazione.
 
 ### 4.2 Selezione del testo — variante fissa per urgenza operativa
 
@@ -383,9 +387,9 @@ disponibile) → codice situazione + variante di testo.
 
 | businessStatus | dataQualityStatus | Codice | Variante testo urgenza |
 |---|---|---|---|
-| qualsiasi | valutazione non ottenibile | `VALUTAZIONE_QUALITA_NON_DISPONIBILE` | — |
-| `CLOSED` | qualsiasi (valutazione ottenuta) | `CHIUSO` | — |
-| `TO_VERIFY` | qualsiasi (valutazione ottenuta) | `DA_VERIFICARE` | — |
+| `CLOSED` | qualsiasi, inclusa valutazione non ottenibile | `CHIUSO` | — |
+| `TO_VERIFY` | qualsiasi, inclusa valutazione non ottenibile | `DA_VERIFICARE` | — |
+| qualsiasi altro stato operativo | valutazione non ottenibile | `VALUTAZIONE_QUALITA_NON_DISPONIBILE` | — |
 | `OVERDUE` | `incomplete_evidence` o `open_findings` | `URGENZA_OPERATIVA_DATI_DA_VERIFICARE` | "già in ritardo" |
 | `CRITICAL` | `incomplete_evidence` o `open_findings` | `URGENZA_OPERATIVA_DATI_DA_VERIFICARE` | "in avvicinamento alla scadenza" |
 | `OVERDUE` | `not_evaluated` | `URGENZA_OPERATIVA_DATI_NON_VALUTATI` | "già in ritardo" |
@@ -397,7 +401,9 @@ disponibile) → codice situazione + variante di testo.
 | `OK` o `WARNING` | `complete` | `SOTTO_CONTROLLO_NESSUNA_ANOMALIA_RILEVATA` | — |
 
 Nove codici distinti, nessuna cella priva di copertura, nessuna cella che classifichi
-`not_evaluated` come equivalente a `complete`.
+`not_evaluated` come equivalente a `complete`. Per `CLOSED` e `TO_VERIFY`, l'eventuale
+indisponibilità della valutazione qualità resta rappresentata dal badge qualità separato e non
+sostituisce la situazione operativa.
 
 ---
 
@@ -408,16 +414,19 @@ Nove codici distinti, nessuna cella priva di copertura, nessuna cella che classi
 2. I due assi esistenti (`businessStatus`, `dataQualityStatus`) restano sempre visibili
    separatamente, mai fusi in un numero unico.
 3. Le nove situazioni combinate di §3.3/§12 sono esaustive e derivate solo dall'albero §4.1.
-4. `not_evaluated` non condivide mai codice o testo con `complete`.
-5. `SECTION_NOT_EVALUATED` non genera mai una voce nella sezione "cosa verificare" insieme a
+4. `CLOSED` e `TO_VERIFY` restano autorevoli anche quando la valutazione qualità non è ottenibile;
+   in tali casi il badge qualità separato comunica l'indisponibilità senza introdurre un nuovo
+   codice situazione.
+5. `not_evaluated` non condivide mai codice o testo con `complete`.
+6. `SECTION_NOT_EVALUATED` non genera mai una voce nella sezione "cosa verificare" insieme a
    segnalazioni genuine, ed è mostrato solo come conteggio nel riepilogo compatto.
-6. Le segnalazioni organizzative non contribuiscono mai al conteggio "segnalazioni di questo
+7. Le segnalazioni organizzative non contribuiscono mai al conteggio "segnalazioni di questo
    ordine" né alla situazione combinata.
-7. Nessun linguaggio orientato al cliente finale; ogni azione suggerita riguarda il fornitore o
+8. Nessun linguaggio orientato al cliente finale; ogni azione suggerita riguarda il fornitore o
    uno stakeholder interno.
-8. Il riepilogo compatto (§6) non supera mai gli elementi elencati; ogni elenco completo vive
+9. Il riepilogo compatto (§6) non supera mai gli elementi elencati; ogni elenco completo vive
    solo nel dettaglio espandibile/collegato.
-9. La richiesta aggiuntiva di dati passa esclusivamente per l'adapter/endpoint autenticato
+10. La richiesta aggiuntiva di dati passa esclusivamente per l'adapter/endpoint autenticato
    esistente, mai per una fetch diretta nel componente.
-10. La visibilità per ruolo del pilota (§7) resta Owner/Admin/IT senza estensione, salvo
+11. La visibilità per ruolo del pilota (§7) resta Owner/Admin/IT senza estensione, salvo
     approvazione separata futura.

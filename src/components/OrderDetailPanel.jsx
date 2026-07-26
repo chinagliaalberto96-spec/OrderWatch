@@ -4,6 +4,7 @@ import { formatDate } from "../utils/dateUtils";
 import StatusBadge from "./StatusBadge";
 import Button from "./Button";
 import OrderOperationalView from "./OrderOperationalView";
+import PurchaseOrderOperationalSummary from "./PurchaseOrderOperationalSummary";
 import { buildInvestigationBannerModel, normalizeFocusIds } from "../utils/dataQualityInvestigation";
 
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
@@ -49,7 +50,7 @@ export function InvestigationBanner({ context }) {
   );
 }
 
-export default function OrderDetailPanel({ order, status, terminology, investigationContext, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate }) {
+export default function OrderDetailPanel({ order, status, terminology, investigationContext, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onFetchPilotQualityContract, currentUserRole, onNavigate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -145,6 +146,12 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
       </div>
       <div className="space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-124px)]">
         <StatusBadge status={status} />
+        <PurchaseOrderOperationalSummary
+          orderId={order.id}
+          businessStatus={status}
+          userRole={currentUserRole}
+          fetchQualityContract={onFetchPilotQualityContract}
+        />
         <InvestigationBanner context={investigationContext} />
 
         {/* Operational view integration. fetchOperationalView is the same
