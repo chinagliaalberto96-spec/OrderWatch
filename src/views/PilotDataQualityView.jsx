@@ -150,7 +150,61 @@ const ORDER_COLUMNS = [
   { key: "status", label: "Stato dati" }
 ];
 
-export function PilotDataQualityViewContent({ contract, organizationName }) {
+// Support/admin investigation handoff: per-order findings carry a real
+// orderId (see scripts/lib/dataQualityContract.mjs#buildFindings) that can
+// be handed to App.jsx's existing navigation flow to open the same order in
+// OrderOperationalView. organizationFindings have no orderId at all — they
+// describe an org-wide fact, not one order — so they never render this
+// action. `onOpenOrder` is optional so this component still renders
+// correctly wherever it's used without navigation wired up (e.g. tests).
+//
+// Scope limitation, deliberate: `context` also carries findingId/type/
+// affectedLines/affectedDocuments, but OrderOperationalView has no
+// line/document highlighting today (src/components/OrderOperationalView.jsx)
+// and affectedLines/affectedDocuments here are bare id arrays with no
+// description (dataQualityContract.mjs#buildFindings). Adding highlighting
+// would need either a second order-fetch path or a new backend query just to
+// resolve those ids — both out of scope. This action is order-level
+// navigation only; `context` is passed through for a future, separately
+// reviewed highlighting feature, not consumed today.
+//
+// Extracted as a pure function (not inlined in the onClick) so the exact
+// payload a click produces is directly testable without simulating a real
+// DOM click event (this codebase's UI tests render via
+// react-dom/server#renderToStaticMarkup, which never executes handlers).
+// Returns null when no navigation is possible: a missing orderId (e.g. an
+// organizationFinding-shaped object, which has none) or no onOpenOrder wired.
+export function buildOpenOrderInvocation(finding, onOpenOrder) {
+  if (!onOpenOrder || !finding?.orderId) return null;
+  return [
+    finding.orderId,
+    {
+      findingId: finding.findingId,
+      type: finding.type,
+      orderCode: finding.orderCode || null,
+      affectedLines: finding.affectedLines || [],
+      affectedDocuments: finding.affectedDocuments || []
+    }
+  ];
+}
+
+function OpenOrderAction({ finding, onOpenOrder }) {
+  const invocation = buildOpenOrderInvocation(finding, onOpenOrder);
+  if (!invocation) return null;
+  const [orderId, context] = invocation;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenOrder(orderId, context)}
+      className="shrink-0 text-xs font-semibold underline-offset-2 hover:underline"
+      style={{ color: "var(--color-primary)" }}
+    >
+      Apri ordine
+    </button>
+  );
+}
+
+export function PilotDataQualityViewContent({ contract, organizationName, onOpenOrder }) {
   if (!contract) {
     return (
       <div className="space-y-4">
@@ -269,9 +323,12 @@ export function PilotDataQualityViewContent({ contract, organizationName }) {
                       {DIMENSION_LABELS[finding.dimension] || finding.dimension}
                     </span>
                   </div>
-                  <span className="text-xs font-medium" style={{ color: "var(--color-text)" }}>
-                    {finding.orderCode || finding.orderId} · {finding.supplierName || "Fornitore non disponibile"}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium" style={{ color: "var(--color-text)" }}>
+                      {finding.orderCode || "Ordine non disponibile"} · {finding.supplierName || "Fornitore non disponibile"}
+                    </span>
+                    <OpenOrderAction finding={finding} onOpenOrder={onOpenOrder} />
+                  </div>
                 </div>
                 <p className="mt-2 text-sm" style={{ color: "var(--color-text)" }}>{finding.description}</p>
                 <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
@@ -341,7 +398,7 @@ export function PilotDataQualityViewContent({ contract, organizationName }) {
 // data. `organizationName` is separate from the contract on purpose (the
 // contract only carries organizationId; the display name comes from the
 // authenticated session, already loaded by App.jsx).
-export default function PilotDataQualityView({ fetchContract, organizationName }) {
+export default function PilotDataQualityView({ fetchContract, organizationName, onOpenOrder }) {
   const [state, dispatch] = useReducer(pilotQualityContractReducer, initialPilotQualityContractState);
   const tokenRef = useRef(0);
 
@@ -381,5 +438,5 @@ export default function PilotDataQualityView({ fetchContract, organizationName }
     );
   }
 
-  return <PilotDataQualityViewContent contract={state.contract} organizationName={organizationName} />;
+  return <PilotDataQualityViewContent contract={state.contract} organizationName={organizationName} onOpenOrder={onOpenOrder} />;
 }

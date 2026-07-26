@@ -16,7 +16,7 @@ import { canPrepareSupplierOrderFromLine, isProcurementRequirement } from "../ut
 // richieste" quando si arriva qui dal KPI della dashboard.
 const ACTION_STATUSES = ["OVERDUE", "CRITICAL", "TO_VERIFY"];
 
-export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate, onPrepareSupplierOrder }) {
+export default function OrdersView({ config, orders, materialLines = [], pendingDeliveryNotesCount = 0, focusOrderCode, focusOrderId, presetFilter, onClearFilter, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onNavigate, onPrepareSupplierOrder }) {
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   // Dopo un refresh dei dati (es. update dal pannello) l'ordine selezionato
@@ -57,12 +57,18 @@ export default function OrdersView({ config, orders, materialLines = [], pending
     return items;
   }, [allRows]);
 
-  // Drill-down dalla dashboard/notifiche: apre direttamente l'ordine indicato.
+  // Drill-down dalla dashboard/notifiche/Data Quality: apre direttamente
+  // l'ordine indicato. focusOrderId (chiave stabile, es. da un finding di
+  // Data Quality) ha priorita' su focusOrderCode quando entrambi sono
+  // presenti — orderCode resta il riferimento leggibile ma non e' la chiave
+  // di matching quando l'id reale e' gia' noto.
   useEffect(() => {
-    if (!focusOrderCode) return;
-    const match = orders.find((order) => order.orderCode === focusOrderCode);
+    if (!focusOrderId && !focusOrderCode) return;
+    const match = focusOrderId
+      ? orders.find((order) => order.id === focusOrderId)
+      : orders.find((order) => order.orderCode === focusOrderCode);
     if (match) setSelectedOrder(match);
-  }, [focusOrderCode, orders]);
+  }, [focusOrderId, focusOrderCode, orders]);
 
   const columns = config.tableColumns.orders.map((key) => ({
     key,

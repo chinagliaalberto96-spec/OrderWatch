@@ -11,6 +11,7 @@
 // output of the actual contract-building pipeline.
 
 import assert from 'assert';
+import { readFile } from 'fs/promises';
 import { createServer } from 'vite';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createElement as h } from 'react';
@@ -201,12 +202,97 @@ async function run() {
     }
     console.log('PASS');
 
-    console.log('Test: recommended actions are read-only text, never a mutation control');
+    console.log('Test: recommended actions are read-only text, never a mutation control, and without onOpenOrder wired no navigation button renders either');
     {
       const html = renderToStaticMarkup(h(PilotDataQualityView, { contract }));
-      assert.ok(!html.includes('<button'), 'the dashboard must remain fully read-only, no action buttons');
+      assert.ok(!html.includes('<button'), 'without onOpenOrder wired, the dashboard must remain fully read-only, no buttons at all');
       assert.ok(!html.includes('<input'), 'the dashboard must not introduce editable fields');
       assert.ok(!html.includes('<form'), 'the dashboard must not introduce a submission form');
+    }
+    console.log('PASS');
+
+    // ------------------------------------------------------------------
+    // Data Quality -> OrderOperationalView navigation (support/admin
+    // investigation handoff). Requirements #1-4/#8 from the task: per-order
+    // findings expose "Apri ordine" only when they carry a real orderId;
+    // organizationFindings (which structurally never have an orderId) never
+    // expose it; the click payload is the real orderId (never a raw label);
+    // no raw UUID is ever shown as visible text.
+    // ------------------------------------------------------------------
+    const { buildOpenOrderInvocation } = view;
+
+    console.log('Test: buildOpenOrderInvocation returns [orderId, context] for a real per-order finding when onOpenOrder is provided');
+    {
+      const onOpenOrder = () => {};
+      const finding = contract.findings.find((f) => f.orderId);
+      assert.ok(finding, 'sample contract must contain at least one per-order finding with an orderId');
+      const invocation = buildOpenOrderInvocation(finding, onOpenOrder);
+      assert.ok(invocation, 'expected a non-null invocation for a valid per-order finding');
+      const [orderId, context] = invocation;
+      assert.strictEqual(orderId, finding.orderId, 'the emitted orderId must be exactly the finding\'s real orderId, the stable navigation key');
+      assert.strictEqual(context.findingId, finding.findingId);
+      assert.strictEqual(context.type, finding.type);
+      assert.strictEqual(context.orderCode, finding.orderCode || null);
+      assert.deepStrictEqual(context.affectedLines, finding.affectedLines || []);
+      assert.deepStrictEqual(context.affectedDocuments, finding.affectedDocuments || []);
+    }
+    console.log('PASS');
+
+    console.log('Test: buildOpenOrderInvocation returns null when orderId is missing (e.g. an organizationFinding-shaped object) or onOpenOrder is not wired');
+    {
+      const perOrderFinding = contract.findings.find((f) => f.orderId);
+      assert.strictEqual(buildOpenOrderInvocation(perOrderFinding, undefined), null, 'no onOpenOrder wired must produce no invocation');
+      assert.strictEqual(buildOpenOrderInvocation({ ...perOrderFinding, orderId: undefined }, () => {}), null, 'a missing orderId must produce no invocation, even with onOpenOrder wired');
+      // organizationFindings shape (see dataQualityContract.mjs#buildOrganizationFindings):
+      // findingId/organizationId/sourceKey/dimension/severity/type/
+      // description/recommendedAction/scope — structurally no orderId field.
+      const orgFinding = { findingId: 'org#SOURCE_INCOMPLETE:operationalLinking', organizationId: contract.organizationId, sourceKey: 'operationalLinking', dimension: 'availability', severity: 'info', type: 'SOURCE_INCOMPLETE', description: 'x', recommendedAction: 'y', scope: 'orderwatch_data_quality' };
+      assert.ok(!('orderId' in orgFinding), 'organizationFindings must structurally have no orderId field at all');
+      assert.strictEqual(buildOpenOrderInvocation(orgFinding, () => {}), null, 'an organization finding must never produce a navigation invocation');
+    }
+    console.log('PASS');
+
+    console.log('Test: with onOpenOrder wired, per-order findings render "Apri ordine" but organization findings never do');
+    {
+      const html = renderToStaticMarkup(h(PilotDataQualityView, { contract, onOpenOrder: () => {} }));
+      const findingsPanel = section(html, 'Segnalazioni di qualità dati per ordine');
+      const orgPanel = section(html, 'Segnalazioni a livello di organizzazione');
+      const openOrderCount = (findingsPanel.match(/Apri ordine/g) || []).length;
+      assert.strictEqual(openOrderCount, contract.findings.length, 'every per-order finding (all of which have a real orderId in this sample) must expose exactly one "Apri ordine" action');
+      assert.ok(!orgPanel.includes('Apri ordine'), 'organization findings must never expose the "Apri ordine" navigation action');
+      assert.ok(findingsPanel.includes('<button'), 'expected at least one real <button> element for the navigation action');
+    }
+    console.log('PASS');
+
+    console.log('Test: a per-order finding with no orderId renders no "Apri ordine" action (omitted, not just disabled)');
+    {
+      const contractWithUnavailableFinding = {
+        ...contract,
+        findings: [
+          { ...contract.findings[0], findingId: 'synthetic#no-order-id', orderId: undefined, orderCode: null }
+        ]
+      };
+      const html = renderToStaticMarkup(h(PilotDataQualityView, { contract: contractWithUnavailableFinding, onOpenOrder: () => {} }));
+      const findingsPanel = section(html, 'Segnalazioni di qualità dati per ordine');
+      assert.ok(!findingsPanel.includes('Apri ordine'), 'a finding without orderId must not expose the navigation action at all');
+      assert.ok(!findingsPanel.includes('<button'), 'no button of any kind should render for an orderId-less finding');
+    }
+    console.log('PASS');
+
+    console.log('Test: no raw UUID is ever displayed as a visible label — orderCode (or an explicit "not available" message) is shown instead');
+    {
+      const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+      const contractWithUuidIds = {
+        ...contract,
+        findings: contract.findings.map((f) => ({ ...f, orderId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', orderCode: null }))
+      };
+      const html = renderToStaticMarkup(h(PilotDataQualityView, { contract: contractWithUuidIds, onOpenOrder: () => {} }));
+      const findingsPanel = section(html, 'Segnalazioni di qualità dati per ordine');
+      assert.ok(!UUID_RE.test(findingsPanel), 'a UUID-shaped orderId must never appear as visible text, even when orderCode is missing');
+      assert.ok(findingsPanel.includes('Ordine non disponibile'), 'a missing human-readable orderCode must render an explicit label, never fall back to the raw id');
+      // The navigation action itself must still work — it carries the real
+      // id as data (an onClick closure argument), not as visible text.
+      assert.ok(findingsPanel.includes('Apri ordine'), 'navigation must still be offered when orderId is present, even without a human-readable orderCode');
     }
     console.log('PASS');
 
@@ -346,6 +432,25 @@ async function run() {
       const htmlNoFetch = renderToStaticMarkup(h(PilotDataQualityViewContainer, { fetchContract: undefined, organizationName: 'Org' }));
       assert.ok(/role="status"/.test(htmlNoFetch), 'with no fetchContract wired, the container must show its initial loading/unavailable state, not fabricated numbers');
       assert.ok(!/\d+%/.test(htmlNoFetch), 'no percentage may render without a real contract, even when fetchContract is missing');
+    }
+    console.log('PASS');
+
+    console.log('Test: the container forwards onOpenOrder to PilotDataQualityViewContent unchanged (source check — SSR never runs the post-mount effect, so the loaded state can\'t be observed by rendering alone)');
+    {
+      const source = await readFile(new URL('../src/views/PilotDataQualityView.jsx', import.meta.url), 'utf8');
+      assert.ok(/<PilotDataQualityViewContent[^>]*onOpenOrder={onOpenOrder}/.test(source), 'the container must forward its onOpenOrder prop to the content component, not drop or rename it');
+    }
+    console.log('PASS');
+
+    console.log('Test: PilotDataQualityView does not fetch order data itself — no OrderOperationalView/order-fetch import anywhere in this file');
+    {
+      const source = await readFile(new URL('../src/views/PilotDataQualityView.jsx', import.meta.url), 'utf8');
+      // Comments are allowed to reference OrderOperationalView by name (this
+      // file documents the handoff and its highlighting limitation) — what
+      // must never exist is an actual import or JSX usage of it.
+      assert.ok(!/^\s*import .*OrderOperationalView/m.test(source), 'PilotDataQualityView must never import OrderOperationalView directly — navigation only, via onOpenOrder');
+      assert.ok(!/<OrderOperationalView\b/.test(source), 'PilotDataQualityView must never render OrderOperationalView directly — navigation only, via onOpenOrder');
+      assert.ok(!/getOrderOperationalView|fetchOperationalView/.test(source), 'PilotDataQualityView must not contain a second order-fetching implementation');
     }
     console.log('PASS');
 

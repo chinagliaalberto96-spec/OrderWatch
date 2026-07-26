@@ -372,6 +372,21 @@ export default function App() {
     setActiveView(view);
   }
 
+  // Data Quality -> OrderOperationalView investigation handoff. This does
+  // NOT fetch order data itself: it reuses the exact same handleNavigate/
+  // drilldown mechanism every other cross-view link in this file already
+  // uses, switching to the existing "orders" view. The real order data still
+  // loads through the existing authenticated flow (OrdersView ->
+  // OrderDetailPanel -> OrderOperationalView -> handleFetchOrderOperationalView
+  // -> adapter.getOrderOperationalView), which independently enforces tenant
+  // isolation server-side — a client-side orderId here never grants access
+  // by itself. `context` (findingId/type/affectedLines/affectedDocuments) is
+  // accepted but currently unused beyond order-level navigation; see the
+  // limitation documented in PilotDataQualityView.jsx.
+  function handleOpenOrderFromFinding(orderId, context = {}) {
+    handleNavigate("orders", { orderId, orderCode: context.orderCode || null });
+  }
+
   function handleSelectReviewItem(item) {
     const nextSeenIds = Array.from(new Set([...seenReviewItemIds, item.id]));
     setSeenReviewItemIds(nextSeenIds);
@@ -736,6 +751,7 @@ export default function App() {
               config={config}
               orders={filteredData.orders}
               focusOrderCode={drilldown.orderCode}
+              focusOrderId={drilldown.orderId}
               presetFilter={drilldown.ordersFilter}
               onClearFilter={() => setDrilldown({})}
               onUpdateOrder={handleUpdateOrder}
@@ -829,7 +845,11 @@ export default function App() {
               GET /api/pilot-quality-contract via the authenticated adapter.
               No mock data anywhere in this path. */}
           {activeView === "pilot_data_quality" && (
-            <PilotDataQualityView fetchContract={handleFetchPilotQualityContract} organizationName={sessionUser?.organizationName} />
+            <PilotDataQualityView
+              fetchContract={handleFetchPilotQualityContract}
+              organizationName={sessionUser?.organizationName}
+              onOpenOrder={handleOpenOrderFromFinding}
+            />
           )}
           {activeView === "settings" && (
             <SettingsView
