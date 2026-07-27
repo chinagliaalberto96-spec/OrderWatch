@@ -1,6 +1,7 @@
 import React, { useEffect, useReducer, useRef } from 'react';
 import { formatDate } from '../utils/dateUtils';
 import { isExactIdFocused, normalizeFocusIds, resolveExistingEvidenceRefs } from '../utils/dataQualityInvestigation';
+import ObservedPurchaseOrderTimeline from './ObservedPurchaseOrderTimeline';
 
 /* ============================================================
  * Pure state machine — no React, no fetch. Directly testable.
@@ -522,6 +523,8 @@ export function OrderOperationalViewContent({ status, error, data, lineFocusIds 
           </div>
         </div>
       </section>
+
+      <ObservedPurchaseOrderTimeline data={d} />
 
       <section aria-labelledby="ooview-lines">
         <h3 id="ooview-lines" className="text-sm font-semibold">Righe operative canoniche</h3>
