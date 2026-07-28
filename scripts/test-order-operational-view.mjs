@@ -28,6 +28,7 @@ async function run() {
         supplier_name: 'ACME Srl',
         supplier_id: 'sup-1',
         supplier_contact_id: null,
+        project_id: 'project-1-private-id',
         project_code: 'PRJ-1',
         material: 'Cartoncino',
         quantity: '10 pcs',
@@ -40,9 +41,18 @@ async function run() {
     }
     if (path.startsWith('canonical_operational_lines?')) {
       return [
-        { id: 'line-1', entity_kind: 'purchase_order_line', description: 'Item A', item_code: 'A-1', quantity: 10, delivered_quantity: 2, remaining_quantity: 8, unit: 'pcs', required_date: '2024-02-01', due_date: null, status: 'open', confidence: null, needs_review: false, canonical_key: 'CK1', updated_at: '2024-01-06T11:00:00Z' },
-        { id: 'line-2', entity_kind: 'purchase_order_line', description: 'Item B', item_code: 'B-1', quantity: 5, delivered_quantity: 0, remaining_quantity: 5, unit: 'pcs', required_date: '2024-02-03', due_date: null, status: 'open', confidence: null, needs_review: false, canonical_key: 'CK2', updated_at: '2024-01-07T11:00:00Z' }
+        { id: 'line-1', entity_kind: 'purchase_order_line', description: 'Item A', item_code: 'A-1', quantity: 10, delivered_quantity: 2, remaining_quantity: 8, unit: 'pcs', required_date: '2024-02-01', due_date: null, status: 'open', confidence: null, needs_review: false, canonical_key: 'CK1', project_id: 'project-1-private-id', project_code: 'PRJ-1', updated_at: '2024-01-06T11:00:00Z' },
+        { id: 'line-2', entity_kind: 'purchase_order_line', description: 'Item B', item_code: 'B-1', quantity: 5, delivered_quantity: 0, remaining_quantity: 5, unit: 'pcs', required_date: '2024-02-03', due_date: null, status: 'open', confidence: null, needs_review: false, canonical_key: 'CK2', project_id: null, project_code: null, updated_at: '2024-01-07T11:00:00Z' }
       ];
+    }
+    if (path.startsWith('projects?')) {
+      return [{
+        id: 'project-1-private-id',
+        organization_id: 'org-1',
+        project_code: 'PRJ-1',
+        name: 'Commessa Uno',
+        status: 'Aperto'
+      }];
     }
     if (path.startsWith('canonical_line_sources?')) {
       return [
@@ -122,6 +132,13 @@ async function run() {
   assert.strictEqual(out.currentObservedSituation.asOf, '2024-01-15T09:00:00.000Z');
   assert.ok(Array.isArray(out.canonicalMaterialLines));
   assert.strictEqual(out.canonicalMaterialLines.length, 2);
+  assert.strictEqual(out.projectContext.evaluationStatus, 'PROJECT_LINK_CONFIRMED');
+  assert.strictEqual(out.projectContext.effectiveProjectSummary.projectCount, 1);
+  assert.deepStrictEqual(out.projectContext.effectiveProjectSummary.projects, [{
+    projectCode: 'PRJ-1',
+    name: 'Commessa Uno',
+    status: 'Aperto'
+  }]);
   assert.ok(Array.isArray(out.evidenceReferences));
   // unresolved/ambiguous commitments truthful unavailable representation
   assert.ok(Array.isArray(out.unresolvedEvidence));
@@ -132,6 +149,9 @@ async function run() {
   assert.strictEqual(out.activeCommitmentsAvailable, false);
   // canonical line provenance refs
   const [line1, line2] = out.canonicalMaterialLines;
+  assert.strictEqual(line1.projectContext.assignmentOrigin, 'EXPLICIT_LINE');
+  assert.strictEqual(line2.projectContext.assignmentOrigin, 'INHERITED_ORDER');
+  assert.strictEqual(line2.projectContext.isInherited, true);
   assert.ok(Array.isArray(line1.provenanceRefs));
   assert.ok(Array.isArray(line2.provenanceRefs));
   assert.strictEqual(line1.provenanceRefs.length, 1);
@@ -173,12 +193,24 @@ async function run() {
   assert.strictEqual(out.anomaliesAndAttention[0].id, 'order-test-match', 'anomaly id must be substituted from alert_key, not a nonexistent "id" column');
   assert.strictEqual(out.anomaliesAndAttention[0].alertKey, 'order-test-match');
   assert.ok(!out.anomaliesAndAttention.some((a) => a.alertKey === 'operational-linking-coverage'), 'an alert with no order-matching metadata must not be attached to this order');
+  assert.ok(!JSON.stringify(out.projectContext).includes('project-1-private-id'), 'raw project ids must not be exposed');
 
   console.log('PASS: authenticated same-tenant');
 
   console.log('Test: quotes table is never queried (no proven order-specific relationship)');
   {
     assert.ok(!queries.some((q) => q.startsWith('quotes?')), 'quotes must never be queried by this route: quotes has no order_id and no other column deterministically ties it to one order');
+  }
+  console.log('PASS');
+
+  console.log('Test: project validation query is tenant-scoped and uses an explicit safe allowlist');
+  {
+    const projectQuery = queries.find((q) => q.startsWith('projects?'));
+    assert.ok(projectQuery, 'expected one project validation query');
+    assert.ok(projectQuery.includes('organization_id=eq.org-1'), `project query must be tenant-scoped: ${projectQuery}`);
+    assert.ok(projectQuery.includes('id=in.(project-1-private-id)'), `project query must use observed ids only: ${projectQuery}`);
+    assert.ok(projectQuery.includes('select=id,organization_id,project_code,name,status'));
+    assert.ok(!projectQuery.includes('select=*'));
   }
   console.log('PASS');
 
@@ -330,6 +362,16 @@ async function run() {
     const authIdx = source.indexOf('authorizeApiRequest(request, response');
     const tryIdx = source.indexOf('try {', authIdx);
     assert.ok(authIdx !== -1 && tryIdx !== -1 && authIdx < tryIdx, 'authorizeApiRequest must run before the try block that calls getOrderOperationalView');
+  }
+  console.log('PASS');
+
+  console.log('Test: existing purchase-order visibility roles remain unchanged');
+  {
+    const source = await readFile(new URL('../server/routes/order-operational-view.js', import.meta.url), 'utf8');
+    assert.ok(
+      source.includes('roles: ["Owner", "IT", "Admin", "Buyer", "ReadOnly"]'),
+      'Phase 2D.1A must preserve the existing read-only role policy'
+    );
   }
   console.log('PASS');
 

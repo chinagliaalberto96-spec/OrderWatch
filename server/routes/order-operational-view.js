@@ -1,6 +1,7 @@
 import { authorizeApiRequest } from "../lib/_auth.js";
 import { orgFilter, supabaseRequest } from "../lib/_supabaseRest.js";
 import { sanitizeSecurityError } from "../lib/_securityRedaction.js";
+import { buildPurchaseOrderProjectContext } from "../lib/purchaseOrderProjectContext.js";
 
 // Deterministic ref assignment helper (E1, E2...)
 function assignRefs(rows) {
@@ -72,7 +73,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
 
   // 1) Load order (tenant-isolated)
   const orders = await reqDb(
-    `orders?id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,order_code,supplier_id,supplier_contact_id,supplier_name,project_code,material,quantity,status,alert_level,order_date,due_date,required_date,days_remaining,notes,updated_at&limit=1`
+    `orders?id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,order_code,supplier_id,supplier_contact_id,supplier_name,project_id,project_code,material,quantity,status,alert_level,order_date,due_date,required_date,days_remaining,notes,updated_at&limit=1`
   );
   const order = (orders && orders[0]) || null;
   if (!order) {
@@ -125,10 +126,35 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
   // Ordering is by created_at with id as a deterministic tiebreaker, using
   // only columns the view actually exposes.
   const lines = await reqDb(
-    `canonical_operational_lines?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,entity_kind,description,item_code,quantity,delivered_quantity,remaining_quantity,unit,required_date,due_date,status,confidence,needs_review,canonical_key,updated_at&order=created_at.asc,id.asc`
+    `canonical_operational_lines?order_id=eq.${encodeURIComponent(orderId)}&${filter}&select=id,entity_kind,description,item_code,quantity,delivered_quantity,remaining_quantity,unit,required_date,due_date,status,confidence,needs_review,canonical_key,project_id,project_code,updated_at&order=created_at.asc,id.asc`
   );
 
-  // 4) canonicalLineSources for evidence excerpts
+  // 4) Validate only already-observed project ids against tenant-scoped rows.
+  // A project code without an id is never resolved by code in this phase.
+  const observedProjectIds = Array.from(new Set([
+    order.project_id,
+    ...(lines || []).map((line) => line.project_id)
+  ].filter(Boolean).map((id) => String(id).trim()).filter(Boolean))).sort();
+  let projectRows = [];
+  if (observedProjectIds.length) {
+    projectRows = await reqDb(
+      `projects?id=in.(${observedProjectIds.map((id) => encodeURIComponent(id)).join(',')})&${filter}&select=id,organization_id,project_code,name,status`
+    );
+  }
+  const projectProjection = buildPurchaseOrderProjectContext({
+    organizationId,
+    orderReference: {
+      projectId: order.project_id || null,
+      projectCode: order.project_code || null
+    },
+    lines: (lines || []).map((line) => ({
+      projectId: line.project_id || null,
+      projectCode: line.project_code || null
+    })),
+    projects: projectRows || []
+  });
+
+  // 5) canonicalLineSources for evidence excerpts
   const lineIds = (lines || []).map((r) => r.id).filter(Boolean);
   let canonicalLineSources = [];
   if (lineIds.length) {
@@ -137,7 +163,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     );
   }
 
-  // 5) linkedDocuments: delivery_notes, invoices, documents
+  // 6) linkedDocuments: delivery_notes, invoices, documents
   //
   // PostgREST select= does not support SQL "column as alias" syntax — it
   // treats the whole string (e.g. "ddt_number as number") as one literal
@@ -182,7 +208,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     ...(documents || []).map((r) => ({ id: r.id, kind: r.document_type || 'document', number: r.name || null, status: r.status || null, receivedAt: r.received_at || null, updatedAt: r.updated_at || null, confidence: r.confidence || null, needsReview: Boolean(r.needs_review), sourceEmailId: r.source_email_id || null, sourceDocumentId: r.source_document_id || null }))
   ];
 
-  // 6) coverageAndSyncHealth (org-wide)
+  // 7) coverageAndSyncHealth (org-wide)
   const coverageRows = await reqDb(`data_source_coverage?${filter}&select=source_key,label,status,reliability,message,limitation`);
   const coverageAndSyncHealth = {
     inboundEmail: coverageRows?.find((r) => r.source_key === 'inbound_email') || null,
@@ -191,7 +217,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     operationalLinking: coverageRows?.find((r) => r.source_key === 'operational_linking') || null
   };
 
-  // 7) anomalies & system health: include alerts that reference this order id or supplier
+  // 8) anomalies & system health: include alerts that reference this order id or supplier
   //
   // system_health_alerts (view, verified live against information_schema.columns)
   // has no "id" column — its natural key is "alert_key" (e.g. "mailbox-error:<uuid>",
@@ -227,7 +253,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     }
   }
 
-  // 8) evidenceReferences (collect from canonicalLineSources and linkedDocuments)
+  // 9) evidenceReferences (collect from canonicalLineSources and linkedDocuments)
   const evidencePool = [];
   for (const src of canonicalLineSources || []) {
     if (src.source_email_id || src.source_document_id) {
@@ -268,7 +294,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     if (row.id) evidenceLookup.set(`id:${row.id}`, v.ref);
   }
 
-  // 9) safeEvidenceExcerpts — reuse observed_values where available but apply allowlist and size limits
+  // 10) safeEvidenceExcerpts — reuse observed_values where available but apply allowlist and size limits
   const safeEvidenceExcerpts = [];
   for (const val of registry.values()) {
     // find matching canonicalLineSources observed_values
@@ -285,12 +311,12 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     }
   }
 
-  // 10) commitments: feature disabled in first read-only version
+  // 11) commitments: feature disabled in first read-only version
   const activeCommitments = [];
   const supersededCommitments = [];
 
-  // 11) canonical lines mapping to contract shape
-  const canonicalMaterialLines = (lines || []).map((r) => ({
+  // 12) canonical lines mapping to contract shape
+  const canonicalMaterialLines = (lines || []).map((r, index) => ({
     id: r.id,
     entityKind: r.entity_kind,
     description: r.description,
@@ -305,6 +331,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     confidence: r.confidence || null,
     needsReview: Boolean(r.needs_review),
     canonicalKey: r.canonical_key || null,
+    projectContext: projectProjection.lineContexts[index],
     // provenance refs: map canonical_line_sources for this line to evidence refs
     provenanceRefs: (() => {
       try {
@@ -327,7 +354,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
     })()
   }));
 
-  // 12) linkedDocuments normalized
+  // 13) linkedDocuments normalized
   const linkedDocsNormalized = linkedDocuments.map((d) => ({ id: d.id, kind: d.kind, number: d.number, status: d.status, receivedAt: d.receivedAt, confidence: d.confidence, needsReview: d.needsReview, sourceEmailId: d.sourceEmailId, sourceDocumentId: d.sourceDocumentId }));
 
   const response = {
@@ -359,6 +386,7 @@ export async function getOrderOperationalView(organizationId, orderId, { supabas
         ...linkedDocuments.map((d) => d.updatedAt || d.receivedAt)
       ])
     },
+    projectContext: projectProjection.projectContext,
     resolvedSupplierOrganization,
     resolvedSupplierContact: null, // unavailable in pilot per contract
     canonicalMaterialLines,

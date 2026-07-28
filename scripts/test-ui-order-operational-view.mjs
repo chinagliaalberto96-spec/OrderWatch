@@ -70,6 +70,23 @@ async function run() {
     currentObservedSituation: { severity: 'ok', label: null, reasonCodes: [], asOf: null },
     resolvedSupplierOrganization: null,
     resolvedSupplierContact: null,
+    projectContext: {
+      evaluationStatus: 'PROCUREMENT_CONTEXT_NOT_EVALUATED',
+      orderReference: {
+        evaluationStatus: 'PROCUREMENT_CONTEXT_NOT_EVALUATED',
+        observedProjectCode: null,
+        codeConsistency: 'PROJECT_CODE_NOT_APPLICABLE',
+        resolvedProject: null,
+        hasConflict: false
+      },
+      effectiveProjectSummary: {
+        projectionStatus: 'NO_PROJECT',
+        isMultiProject: false,
+        projectCount: 0,
+        projects: []
+      },
+      lineSummary: { total: 2, explicit: 0, inherited: 0, unassigned: 2, invalid: 0 }
+    },
     canonicalMaterialLines: [
       { id: 'line-1', description: 'Item A', quantity: 10, status: 'open', provenanceRefs: ['E1'] },
       { id: 'line-2', description: 'Item B', quantity: 5, status: 'open', provenanceRefs: ['E2'] }
@@ -444,6 +461,23 @@ async function run() {
       currentObservedSituation: { severity: 'ok', asOf: null },
       resolvedSupplierOrganization: { legalName: 'ACME Srl' },
       resolvedSupplierContact: null, // 6. must not be inferred from the org
+      projectContext: {
+        evaluationStatus: 'PROCUREMENT_CONTEXT_NOT_EVALUATED',
+        orderReference: {
+          evaluationStatus: 'PROCUREMENT_CONTEXT_NOT_EVALUATED',
+          observedProjectCode: null,
+          codeConsistency: 'PROJECT_CODE_NOT_APPLICABLE',
+          resolvedProject: null,
+          hasConflict: false
+        },
+        effectiveProjectSummary: {
+          projectionStatus: 'NO_PROJECT',
+          isMultiProject: false,
+          projectCount: 0,
+          projects: []
+        },
+        lineSummary: { total: 2, explicit: 0, inherited: 0, unassigned: 2, invalid: 0 }
+      },
       canonicalMaterialLines: [
         { id: 'line-1', description: 'Item A', quantity: 10, status: 'open', provenanceRefs: ['E1'] },
         { id: 'line-2', description: 'Item B', quantity: 5, status: 'open', provenanceRefs: ['E2', 'E9'] } // E9 = dangling
@@ -479,6 +513,128 @@ async function run() {
     {
       const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: baseData }));
       assert.ok(html.includes('Non disponibile'));
+    }
+    console.log('PASS');
+
+    console.log('Test: project context is read-only, neutral when not evaluated, and never exposes raw ids');
+    {
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, {
+        status: 'loaded',
+        error: null,
+        data: baseData
+      }));
+      const projectSection = sectionSlice(html, 'ooview-project-context');
+      assert.ok(projectSection.includes('Contesto commessa non ancora valutato'));
+      assert.ok(!projectSection.includes('Errore'));
+      assert.ok(!projectSection.includes('project-private-id'));
+    }
+    console.log('PASS');
+
+    console.log('Test: confirmed project and line assignment origin are rendered distinctly');
+    {
+      const data = {
+        ...baseData,
+        projectContext: {
+          evaluationStatus: 'PROJECT_LINK_CONFIRMED',
+          orderReference: {
+            evaluationStatus: 'PROJECT_LINK_CONFIRMED',
+            observedProjectCode: 'PRJ-1',
+            codeConsistency: 'PROJECT_CODE_CONSISTENT',
+            resolvedProject: { projectCode: 'PRJ-1', name: 'Commessa Uno', status: 'Aperto' },
+            hasConflict: false
+          },
+          effectiveProjectSummary: {
+            projectionStatus: 'SINGLE_PROJECT',
+            isMultiProject: false,
+            projectCount: 1,
+            projects: [{ projectCode: 'PRJ-1', name: 'Commessa Uno', status: 'Aperto' }]
+          },
+          lineSummary: { total: 2, explicit: 1, inherited: 1, unassigned: 0, invalid: 0 }
+        },
+        canonicalMaterialLines: [
+          {
+            ...baseData.canonicalMaterialLines[0],
+            projectContext: {
+              evaluationStatus: 'PROJECT_LINK_CONFIRMED',
+              assignmentOrigin: 'EXPLICIT_LINE',
+              effectiveProject: { projectCode: 'PRJ-1', name: 'Commessa Uno', status: 'Aperto' }
+            }
+          },
+          {
+            ...baseData.canonicalMaterialLines[1],
+            projectContext: {
+              evaluationStatus: 'PROJECT_LINK_CONFIRMED',
+              assignmentOrigin: 'INHERITED_ORDER',
+              effectiveProject: { projectCode: 'PRJ-1', name: 'Commessa Uno', status: 'Aperto' }
+            }
+          }
+        ]
+      };
+      const html = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data }));
+      assert.ok(html.includes('Commessa Uno'));
+      assert.ok(html.includes('Esplicita'));
+      assert.ok(html.includes('Ereditata dall’ordine'));
+      assert.ok(!html.includes('project-private-id'));
+    }
+    console.log('PASS');
+
+    console.log('Test: code-only, conflict and multi-project states use fixed non-confirming copy');
+    {
+      const codeOnly = {
+        ...baseData,
+        projectContext: {
+          ...baseData.projectContext,
+          evaluationStatus: 'PROJECT_CODE_OBSERVED_UNVERIFIED',
+          orderReference: {
+            ...baseData.projectContext.orderReference,
+            evaluationStatus: 'PROJECT_CODE_OBSERVED_UNVERIFIED',
+            observedProjectCode: 'OBS-7'
+          }
+        }
+      };
+      const codeOnlyHtml = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: codeOnly }));
+      assert.ok(codeOnlyHtml.includes('OBS-7'));
+      assert.ok(codeOnlyHtml.includes('Non verificato'));
+      assert.ok(!codeOnlyHtml.includes('è stato verificato'));
+
+      const conflict = {
+        ...baseData,
+        projectContext: {
+          ...baseData.projectContext,
+          evaluationStatus: 'PROJECT_LINK_CONFLICT',
+          orderReference: {
+            evaluationStatus: 'PROJECT_LINK_CONFLICT',
+            observedProjectCode: 'OBS-8',
+            codeConsistency: 'PROJECT_CODE_CONFLICT',
+            resolvedProject: { projectCode: 'PRJ-1', name: 'Commessa Uno', status: 'Aperto' },
+            hasConflict: true
+          }
+        }
+      };
+      const conflictHtml = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: conflict }));
+      assert.ok(conflictHtml.includes('non sono coerenti'));
+      assert.ok(conflictHtml.includes('Codice osservato: OBS-8'));
+
+      const multi = {
+        ...baseData,
+        projectContext: {
+          ...baseData.projectContext,
+          evaluationStatus: 'MULTI_PROJECT_ORDER',
+          effectiveProjectSummary: {
+            projectionStatus: 'MULTI_PROJECT_ORDER',
+            isMultiProject: true,
+            projectCount: 2,
+            projects: [
+              { projectCode: 'PRJ-1', name: 'Commessa Uno', status: 'Aperto' },
+              { projectCode: 'PRJ-2', name: 'Commessa Due', status: 'Aperto' }
+            ]
+          }
+        }
+      };
+      const multiHtml = renderToStaticMarkup(h(OrderOperationalViewContent, { status: 'loaded', error: null, data: multi }));
+      assert.ok(multiHtml.includes('Ordine multi-commessa'));
+      assert.ok(multiHtml.includes('Commessa Uno'));
+      assert.ok(multiHtml.includes('Commessa Due'));
     }
     console.log('PASS');
 
@@ -769,7 +925,7 @@ async function run() {
       assert.ok(!/>Fornitore</.test(panelHtml), 'the supplier row must not be duplicated below the operational view');
       assert.ok(!/>Materiale</.test(panelHtml), 'the material row must not be duplicated below the operational view');
       assert.ok(!/>Quantita</.test(panelHtml), 'the quantity row must not be duplicated below the operational view');
-      assert.ok(/>Lavoro</.test(panelHtml), 'project ("Lavoro") is not a duplicate and must remain visible');
+      assert.ok(!/>Lavoro</.test(panelHtml), 'the unvalidated legacy project-code row must not duplicate the validated project context');
     }
     console.log('PASS');
 

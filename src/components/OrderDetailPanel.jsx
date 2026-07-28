@@ -46,7 +46,7 @@ export function InvestigationBanner({ context }) {
   );
 }
 
-export default function OrderDetailPanel({ order, status, terminology, investigationContext, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onFetchPilotQualityContract, currentUserRole, onNavigate }) {
+export default function OrderDetailPanel({ order, status, terminology, investigationContext, onClose, onUpdateOrder, onDeleteOrder, onFetchOrderOperationalView, onFetchPilotQualityContract, currentUserRole }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(false);
@@ -78,7 +78,6 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
     (status === "CLOSED" || status === "OVERDUE" || order.status === "Scaduto" || order.needsReview);
 
   const rows = [
-    [terminology.projectSingular, order.projectCode],
     ["Data ordine", formatDate(order.orderDate)],
     [terminology.dueDate, formatDate(order.dueDate)],
     ["Data richiesta", formatDate(order.requiredDate)]
@@ -175,13 +174,7 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
             {rows.map(([label, value]) => (
               <div key={label} className="grid grid-cols-[140px_1fr] gap-3 text-sm">
                 <dt style={{ color: "var(--color-text-muted)" }}>{label}</dt>
-                <dd className="font-medium">
-                  {label === terminology.projectSingular && value !== "-" && onNavigate ? (
-                    <Citation onClick={() => onNavigate("projects", { projectCode: value })}>{value}</Citation>
-                  ) : (
-                    value
-                  )}
-                </dd>
+                <dd className="font-medium">{value}</dd>
               </div>
             ))}
           </dl>
@@ -324,20 +317,5 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
         )}
       </div>
     </aside>
-  );
-}
-
-// Stesso stile dei chip citazione di AlteraView: porta dritti al dato
-// collegato invece di lasciarlo come testo statico.
-function Citation({ onClick, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-full border px-2.5 py-1 text-xs font-semibold"
-      style={{ borderColor: "var(--color-border)" }}
-    >
-      {children}
-    </button>
   );
 }

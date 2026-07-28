@@ -3,6 +3,7 @@ import { formatDate } from '../utils/dateUtils';
 import { isExactIdFocused, normalizeFocusIds, resolveExistingEvidenceRefs } from '../utils/dataQualityInvestigation';
 import ObservedPurchaseOrderTimeline from './ObservedPurchaseOrderTimeline';
 import PurchaseOrderOperationalSuggestions from './PurchaseOrderOperationalSuggestions';
+import PurchaseOrderProjectContext, { LineProjectContext } from './PurchaseOrderProjectContext';
 
 /* ============================================================
  * Pure state machine — no React, no fetch. Directly testable.
@@ -536,6 +537,8 @@ export function OrderOperationalViewContent({
         </div>
       </section>
 
+      <PurchaseOrderProjectContext projectContext={d.projectContext} />
+
       <ObservedPurchaseOrderTimeline data={d} />
       <PurchaseOrderOperationalSuggestions
         key={d.orderId || d.orderNumber || 'order-suggestions'}
@@ -556,6 +559,7 @@ export function OrderOperationalViewContent({
                   <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Descrizione</th>
                   <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Quantita</th>
                   <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Stato</th>
+                  <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Commessa</th>
                   <th scope="col" className="text-left text-xs font-semibold border-b p-1" style={{ borderColor: 'var(--color-border)' }}>Provenienza</th>
                 </tr>
               </thead>
@@ -572,6 +576,9 @@ export function OrderOperationalViewContent({
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.description || 'Riga'}</td>
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.quantity ?? 'Non disponibile'}</td>
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>{ln.status || 'Non disponibile'}</td>
+                    <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                      <LineProjectContext context={ln.projectContext} />
+                    </td>
                     <td className="p-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
                       <ProvenanceRefs refs={ln.provenanceRefs} evidenceReferences={evidenceReferences} />
                     </td>
