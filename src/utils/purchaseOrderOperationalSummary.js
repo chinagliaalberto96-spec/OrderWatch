@@ -189,18 +189,6 @@ export function countSectionNotEvaluated(findings) {
     .length;
 }
 
-export function deduplicateRecommendedActions(findings) {
-  const seen = new Set();
-  const actions = [];
-  for (const finding of sortGenuineOrderFindings(findings)) {
-    const action = sanitizePurchaseOrderSummaryText(finding?.recommendedAction);
-    if (!action || seen.has(action)) continue;
-    seen.add(action);
-    actions.push(action);
-  }
-  return actions;
-}
-
 export function countOrganizationFindings(organizationFindings) {
   return Array.isArray(organizationFindings) ? organizationFindings.length : 0;
 }
@@ -253,7 +241,6 @@ export function buildPurchaseOrderOperationalSummary({
     remainingFindingCount: compactFindings.remainingCount,
     genuineFindingCount: compactFindings.totalCount,
     sectionNotEvaluatedCount: countSectionNotEvaluated(qualityContract?.findings),
-    recommendedActions: deduplicateRecommendedActions(qualityContract?.findings),
     organizationFindingCount: countOrganizationFindings(qualityContract?.organizationFindings),
     generatedAt: qualityContract?.generatedAt || null
   };

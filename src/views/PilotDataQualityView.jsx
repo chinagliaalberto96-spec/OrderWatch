@@ -184,8 +184,7 @@ export function buildOpenOrderInvocation(finding, onOpenOrder) {
       affectedLines: finding.affectedLines || [],
       affectedDocuments: finding.affectedDocuments || [],
       evidenceRefs: finding.evidenceRefs || [],
-      description: finding.description || null,
-      recommendedAction: finding.recommendedAction || null
+      description: finding.description || null
     }
   ];
 }
@@ -338,7 +337,6 @@ export function PilotDataQualityViewContent({ contract, organizationName, onOpen
                   <span>Documenti interessati: {finding.affectedDocuments?.length ? finding.affectedDocuments.length : "nessuno"}</span>
                   <span>Riferimenti evidenza: {finding.evidenceRefs?.length ? finding.evidenceRefs.join(", ") : "nessuno"}</span>
                 </div>
-                <p className="mt-2 text-xs italic" style={{ color: "var(--color-text-muted)" }}>{finding.recommendedAction}</p>
               </li>
             ))}
           </ul>
@@ -375,7 +373,6 @@ export function PilotDataQualityViewContent({ contract, organizationName, onOpen
                     )}
                   </div>
                   <p className="mt-2 text-sm" style={{ color: "var(--color-text)" }}>{finding.description}</p>
-                  <p className="mt-2 text-xs italic" style={{ color: "var(--color-text-muted)" }}>{finding.recommendedAction}</p>
                 </li>
               ))}
             </ul>

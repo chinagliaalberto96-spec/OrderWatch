@@ -305,19 +305,27 @@ try {
   }
   console.log("PASS");
 
-  console.log("Test: all five order-view roles receive identical read-only output");
+  console.log("Test: all five order-view roles retain the same read-only operational action");
   {
     const data = fixture([line("line-role", { dueDate: "2026-07-20" })]);
-    const outputs = ["Owner", "Admin", "IT", "Buyer", "ReadOnly"].map((userRole) =>
+    const outputs = Object.fromEntries(["Owner", "Admin", "IT", "Buyer", "ReadOnly"].map((userRole) => [
+      userRole,
       renderToStaticMarkup(h(PurchaseOrderOperationalSuggestions, {
         data,
         businessStatus: "OK",
         referenceDate: REFERENCE_DATE,
         userRole
       }))
-    );
-    assert.ok(outputs.every((html) => html === outputs[0]));
-    assert.ok(!/Completa|Assegna|Posticipa|Contatta fornitore|Crea task/.test(outputs[0]));
+    ]));
+    for (const html of Object.values(outputs)) {
+      assert.ok(html.includes("Riga line-role"));
+      assert.ok(!/Completa|Assegna|Posticipa|Contatta fornitore|Crea task/.test(html));
+    }
+    assert.ok(outputs.Owner.includes("Qualità dati"));
+    assert.ok(outputs.Admin.includes("Qualità dati"));
+    assert.ok(outputs.IT.includes("Qualità dati"));
+    assert.ok(!outputs.Buyer.includes("Qualità dati"));
+    assert.ok(!outputs.ReadOnly.includes("Qualità dati"));
   }
   console.log("PASS");
 } finally {

@@ -10,7 +10,6 @@ import {
   canViewPurchaseOrderQualitySummary,
   countOrganizationFindings,
   countSectionNotEvaluated,
-  deduplicateRecommendedActions,
   derivePurchaseOrderSituation,
   extractSingleOrderQualityContract,
   formatEvidenceCoverage,
@@ -178,18 +177,25 @@ console.log("Test: genuine findings are severity/id sorted, capped at three, and
 }
 console.log("PASS");
 
-console.log("Test: actions are exact-text deduplicated and never sourced from SECTION_NOT_EVALUATED");
+console.log("Test: Phase 2A never exposes recommended actions in its presentation model");
 {
   const findings = [
     makeFinding({ findingId: "f-1", recommendedAction: "Verificare la fonte." }),
-    makeFinding({ findingId: "f-2", recommendedAction: "Verificare la fonte." }),
     makeFinding({ findingId: "f-3", recommendedAction: "Controllare il documento." }),
     makeFinding({ findingId: "section", type: "SECTION_NOT_EVALUATED", recommendedAction: "Non deve apparire." })
   ];
-  assert.deepStrictEqual(
-    deduplicateRecommendedActions(findings),
-    ["Verificare la fonte.", "Controllare il documento."]
-  );
+  const model = buildPurchaseOrderOperationalSummary({
+    businessStatus: "OK",
+    qualityEvaluationObtainable: true,
+    qualityContract: extractSingleOrderQualityContract(
+      makeContract({ findings }),
+      "order-1"
+    )
+  });
+  assert.ok(!Object.prototype.hasOwnProperty.call(model, "recommendedActions"));
+  assert.ok(!JSON.stringify(model).includes("Verificare la fonte."));
+  assert.ok(!JSON.stringify(model).includes("Controllare il documento."));
+  assert.ok(!JSON.stringify(model).includes("Non deve apparire."));
 }
 console.log("PASS");
 
@@ -397,7 +403,14 @@ console.log("Test: App → OrdersView → OrderDetailPanel passes the stable ada
   assert.ok(appSource.includes("currentUserRole={sessionUser?.role}"));
   assert.ok(ordersSource.includes("onFetchPilotQualityContract={onFetchPilotQualityContract}"));
   assert.ok(ordersSource.includes("currentUserRole={currentUserRole}"));
-  assert.ok(panelSource.includes("fetchQualityContract={onFetchPilotQualityContract}"));
+  assert.ok(panelSource.includes("usePurchaseOrderQualityContract({"));
+  assert.ok(panelSource.includes("fetchQualityContract: onFetchPilotQualityContract"));
+  assert.strictEqual(
+    (panelSource.match(/usePurchaseOrderQualityContract\(\{/g) || []).length,
+    1,
+    "OrderDetailPanel must own exactly one quality-contract request lifecycle"
+  );
+  assert.ok(panelSource.includes("qualityState={qualityState}"));
 }
 console.log("PASS");
 

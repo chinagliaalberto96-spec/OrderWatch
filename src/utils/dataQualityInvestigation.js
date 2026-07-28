@@ -146,8 +146,7 @@ export function normalizeFindingContext(value) {
       (Array.isArray(value.evidenceRefs) ? value.evidenceRefs : [])
         .filter((ref) => typeof ref === "string" && ref)
     )),
-    description: optionalVisibleString(value.description),
-    recommendedAction: optionalVisibleString(value.recommendedAction)
+    description: optionalVisibleString(value.description)
   };
 }
 
@@ -173,7 +172,6 @@ export function buildInvestigationBannerModel(value) {
     affectedLineSummaries: context.affectedLines.map(lineDisplay).filter(Boolean),
     affectedDocumentSummaries: context.affectedDocuments.map(documentDisplay).filter(Boolean),
     description: context.description,
-    recommendedAction: context.recommendedAction,
     cannotConfirm: CANNOT_CONFIRM_BY_TYPE[context.type] || GENERIC_CANNOT_CONFIRM
   };
 }

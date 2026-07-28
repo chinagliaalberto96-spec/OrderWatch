@@ -6,6 +6,7 @@ import Button from "./Button";
 import OrderOperationalView from "./OrderOperationalView";
 import PurchaseOrderOperationalSummary from "./PurchaseOrderOperationalSummary";
 import { buildInvestigationBannerModel, normalizeFocusIds } from "../utils/dataQualityInvestigation";
+import usePurchaseOrderQualityContract from "../hooks/usePurchaseOrderQualityContract";
 
 // Stati impostabili manualmente dal buyer (devono rispettare il CHECK del DB).
 const BUYER_STATUSES = ["In attesa", "Confermato", "Ricevuto", "Annullato"];
@@ -38,11 +39,6 @@ export function InvestigationBanner({ context }) {
         </p>
       )}
       {model.description && <p className="mt-2 text-sm">{model.description}</p>}
-      {model.recommendedAction && (
-        <p className="mt-2 text-sm">
-          <span className="font-semibold">Verifica consigliata:</span> {model.recommendedAction}
-        </p>
-      )}
       <p className="mt-2 text-sm" style={{ color: "var(--color-text-muted)" }}>
         <span className="font-semibold">Cosa OrderWatch non può confermare:</span> {model.cannotConfirm}
       </p>
@@ -56,6 +52,11 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const qualityState = usePurchaseOrderQualityContract({
+    orderId: order?.id,
+    userRole: currentUserRole,
+    fetchQualityContract: onFetchPilotQualityContract
+  });
 
   useEffect(() => {
     // Cambiando ordine si esce da modifica/conferma eliminazione.
@@ -147,10 +148,9 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
       <div className="space-y-5 overflow-y-auto p-4 xl:max-h-[calc(100vh-124px)]">
         <StatusBadge status={status} />
         <PurchaseOrderOperationalSummary
-          orderId={order.id}
           businessStatus={status}
           userRole={currentUserRole}
-          fetchQualityContract={onFetchPilotQualityContract}
+          qualityState={qualityState}
         />
         <InvestigationBanner context={investigationContext} />
 
@@ -162,6 +162,8 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
             orderId={order?.id}
             fetchOperationalView={onFetchOrderOperationalView}
             businessStatus={status}
+            qualityState={qualityState}
+            currentUserRole={currentUserRole}
             lineFocusIds={normalizeFocusIds(investigationContext?.affectedLines)}
             documentFocusIds={normalizeFocusIds(investigationContext?.affectedDocuments)}
             evidenceFocusRefs={investigationContext?.evidenceRefs || []}

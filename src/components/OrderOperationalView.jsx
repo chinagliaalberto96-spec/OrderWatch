@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useRef } from 'react';
+import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { formatDate } from '../utils/dateUtils';
 import { isExactIdFocused, normalizeFocusIds, resolveExistingEvidenceRefs } from '../utils/dataQualityInvestigation';
 import ObservedPurchaseOrderTimeline from './ObservedPurchaseOrderTimeline';
@@ -421,7 +421,18 @@ function AdvancedVerificationSections({ data }) {
   );
 }
 
-export function OrderOperationalViewContent({ status, error, data, businessStatus = null, lineFocusIds = [], documentFocusIds = [], evidenceFocusRefs = [] }) {
+export function OrderOperationalViewContent({
+  status,
+  error,
+  data,
+  businessStatus = null,
+  qualityState = null,
+  currentUserRole = null,
+  lineFocusIds = [],
+  documentFocusIds = [],
+  evidenceFocusRefs = [],
+  onNavigateDiagnosticTarget = () => {}
+}) {
   if (status === 'loading') {
     return (
       <div role="status" aria-live="polite" className="py-3 px-2 text-sm">
@@ -530,6 +541,9 @@ export function OrderOperationalViewContent({ status, error, data, businessStatu
         key={d.orderId || d.orderNumber || 'order-suggestions'}
         data={d}
         businessStatus={businessStatus}
+        qualityState={qualityState}
+        userRole={currentUserRole}
+        onNavigateDiagnosticTarget={onNavigateDiagnosticTarget}
       />
 
       <section aria-labelledby="ooview-lines">
@@ -650,12 +664,15 @@ export default function OrderOperationalView({
   fetchOperationalView,
   fetchOverride,
   businessStatus = null,
+  qualityState = null,
+  currentUserRole = null,
   lineFocusIds = [],
   documentFocusIds = [],
   evidenceFocusRefs = []
 }) {
   const fetchFn = fetchOverride || fetchOperationalView;
   const [state, dispatch] = useReducer(orderOperationalViewReducer, initialOrderOperationalViewState);
+  const [diagnosticFocus, setDiagnosticFocus] = useState(null);
   const tokenRef = useRef(0);
 
   useEffect(() => {
@@ -682,6 +699,25 @@ export default function OrderOperationalView({
     };
   }, [orderId, fetchFn]);
 
+  useEffect(() => {
+    setDiagnosticFocus(null);
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!diagnosticFocus || typeof document === 'undefined') return;
+    const selector = diagnosticFocus.type === 'line'
+      ? '[data-investigation-focus="line"]'
+      : '[data-investigation-focus="document"]';
+    document.querySelector(selector)?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [diagnosticFocus]);
+
+  const combinedLineFocusIds = diagnosticFocus?.type === 'line'
+    ? [diagnosticFocus.id]
+    : lineFocusIds;
+  const combinedDocumentFocusIds = diagnosticFocus?.type === 'document'
+    ? [diagnosticFocus.id]
+    : documentFocusIds;
+
   if (!orderId) return null;
   return (
     <OrderOperationalViewContent
@@ -689,9 +725,12 @@ export default function OrderOperationalView({
       error={state.error}
       data={state.data}
       businessStatus={businessStatus}
-      lineFocusIds={lineFocusIds}
-      documentFocusIds={documentFocusIds}
+      qualityState={qualityState}
+      currentUserRole={currentUserRole}
+      lineFocusIds={combinedLineFocusIds}
+      documentFocusIds={combinedDocumentFocusIds}
       evidenceFocusRefs={evidenceFocusRefs}
+      onNavigateDiagnosticTarget={setDiagnosticFocus}
     />
   );
 }

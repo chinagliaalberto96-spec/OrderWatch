@@ -186,7 +186,7 @@ async function run() {
     }
     console.log('PASS');
 
-    console.log('Test: findings panel shows type, severity, affected order, affected lines/documents and recommended action');
+    console.log('Test: findings panel shows type, severity, affected order and affected lines/documents without rendering freeform recommended actions');
     {
       const html = renderToStaticMarkup(h(PilotDataQualityView, { contract }));
       const panel = section(html, 'Segnalazioni di qualità dati');
@@ -194,7 +194,7 @@ async function run() {
       for (const finding of contract.findings) {
         assert.ok(panel.includes(finding.type), `expected finding type ${finding.type}`);
         assert.ok(panel.includes(finding.orderCode), `expected affected order ${finding.orderCode}`);
-        assert.ok(panel.includes(finding.recommendedAction), `expected recommended action for ${finding.type}`);
+        assert.ok(!panel.includes(finding.recommendedAction), `recommended action must not render for ${finding.type}`);
       }
       assert.ok(panel.includes('Righe interessate:'), 'affected lines must be shown');
       assert.ok(panel.includes('Documenti interessati:'), 'affected documents must be shown');
@@ -202,7 +202,7 @@ async function run() {
     }
     console.log('PASS');
 
-    console.log('Test: recommended actions are read-only text, never a mutation control, and without onOpenOrder wired no navigation button renders either');
+    console.log('Test: freeform recommended actions are absent and without onOpenOrder wired no navigation button renders either');
     {
       const html = renderToStaticMarkup(h(PilotDataQualityView, { contract }));
       assert.ok(!html.includes('<button'), 'without onOpenOrder wired, the dashboard must remain fully read-only, no buttons at all');
@@ -240,7 +240,7 @@ async function run() {
       assert.deepStrictEqual(context.affectedDocuments, finding.affectedDocuments || []);
       assert.deepStrictEqual(context.evidenceRefs, finding.evidenceRefs || []);
       assert.strictEqual(context.description, finding.description || null);
-      assert.strictEqual(context.recommendedAction, finding.recommendedAction || null);
+      assert.ok(!Object.prototype.hasOwnProperty.call(context, 'recommendedAction'));
     }
     console.log('PASS');
 

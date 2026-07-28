@@ -26,7 +26,7 @@ function sourceLineNumber(ref) {
   return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
 }
 
-function compareEvidenceRefs(a, b) {
+export function compareEvidenceRefs(a, b) {
   return evidenceSuffix(a?.ref) - evidenceSuffix(b?.ref)
     || sourceLineNumber(a) - sourceLineNumber(b)
     || asStableString(a?.ref).localeCompare(asStableString(b?.ref));
