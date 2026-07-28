@@ -17,6 +17,10 @@ import {
   selectCompactOrderFindings,
   sortGenuineOrderFindings
 } from "../src/utils/purchaseOrderOperationalSummary.js";
+import {
+  PURCHASE_ORDER_FINDING_FACTUAL_COPY,
+  UNKNOWN_PURCHASE_ORDER_FINDING_FACTUAL_COPY
+} from "../src/utils/purchaseOrderFindingPresentation.js";
 
 const QUALITY_STATES = ["incomplete_evidence", "open_findings", "not_evaluated", "complete"];
 
@@ -199,6 +203,61 @@ console.log("Test: Phase 2A never exposes recommended actions in its presentatio
 }
 console.log("PASS");
 
+console.log("Test: all eight genuine finding types use the approved deterministic Italian copy");
+{
+  for (const [type, expectedCopy] of Object.entries(PURCHASE_ORDER_FINDING_FACTUAL_COPY)) {
+    const rawDescription = `RAW ENGLISH DESCRIPTION ${type}`;
+    const model = buildPurchaseOrderOperationalSummary({
+      businessStatus: "OK",
+      qualityEvaluationObtainable: true,
+      qualityContract: extractSingleOrderQualityContract(
+        makeContract({
+          findings: [makeFinding({
+            findingId: `finding-${type}`,
+            type,
+            description: rawDescription
+          })]
+        }),
+        "order-1"
+      )
+    });
+    assert.strictEqual(model.findings[0].description, expectedCopy, type);
+    assert.ok(!JSON.stringify(model).includes(rawDescription), type);
+  }
+  assert.strictEqual(
+    PURCHASE_ORDER_FINDING_FACTUAL_COPY.OPERATIONAL_STATE_UNEXPLAINED,
+    "Lo stato operativo corrente non è completamente spiegato dai dati disponibili."
+  );
+}
+console.log("PASS");
+
+console.log("Test: unknown genuine types fail closed to neutral copy without exposing raw input");
+{
+  const rawDescription = "CONTACT THE SUPPLIER IMMEDIATELY";
+  const rawAction = "DELETE INTERNAL RECORD";
+  const model = buildPurchaseOrderOperationalSummary({
+    businessStatus: "OK",
+    qualityEvaluationObtainable: true,
+    qualityContract: extractSingleOrderQualityContract(
+      makeContract({
+        findings: [makeFinding({
+          findingId: "opaque-unknown-finding",
+          type: "UNAPPROVED_INTERNAL_TYPE",
+          description: rawDescription,
+          recommendedAction: rawAction
+        })]
+      }),
+      "order-1"
+    )
+  });
+  assert.strictEqual(model.findings.length, 1);
+  assert.strictEqual(model.findings[0].description, UNKNOWN_PURCHASE_ORDER_FINDING_FACTUAL_COPY);
+  assert.ok(!JSON.stringify(model).includes("UNAPPROVED_INTERNAL_TYPE"));
+  assert.ok(!JSON.stringify(model).includes(rawDescription));
+  assert.ok(!JSON.stringify(model).includes(rawAction));
+}
+console.log("PASS");
+
 console.log("Test: organization findings remain separate and cannot alter the order situation");
 {
   assert.strictEqual(countOrganizationFindings([{ findingId: "org-1" }, { findingId: "org-2" }]), 2);
@@ -352,14 +411,17 @@ try {
   }
   console.log("PASS");
 
-  console.log("Test: visible summary redacts UUIDs and never renders finding identifiers");
+  console.log("Test: visible summary never renders raw finding text, type codes, UUIDs or identifiers");
   {
     const uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const rawDescription = `RAW ENGLISH ${uuid}`;
+    const rawAction = `RAW ACTION ${uuid}`;
     const qualityContract = extractSingleOrderQualityContract(makeContract({
       findings: [makeFinding({
         findingId: uuid,
-        description: `Controllare ${uuid}.`,
-        recommendedAction: `Aprire ${uuid}.`
+        type: "UNAPPROVED_INTERNAL_TYPE",
+        description: rawDescription,
+        recommendedAction: rawAction
       })]
     }), "order-1");
     const html = renderToStaticMarkup(h(component.PurchaseOrderOperationalSummaryContent, {
@@ -367,7 +429,10 @@ try {
       businessStatus: "OK"
     }));
     assert.ok(!html.includes(uuid));
-    assert.ok(html.includes("riferimento interno"));
+    assert.ok(!html.includes("UNAPPROVED_INTERNAL_TYPE"));
+    assert.ok(!html.includes("RAW ENGLISH"));
+    assert.ok(!html.includes("RAW ACTION"));
+    assert.ok(html.includes("È presente una segnalazione di qualità dati da verificare."));
   }
   console.log("PASS");
 

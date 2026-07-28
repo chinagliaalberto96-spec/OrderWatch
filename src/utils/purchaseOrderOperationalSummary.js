@@ -1,3 +1,5 @@
+import { getPurchaseOrderFindingFactualCopy } from "./purchaseOrderFindingPresentation.js";
+
 export const PURCHASE_ORDER_QUALITY_ROLES = Object.freeze(["Owner", "Admin", "IT"]);
 
 export const PURCHASE_ORDER_SITUATIONS = Object.freeze({
@@ -22,6 +24,12 @@ const KNOWN_QUALITY_STATUSES = new Set([
 const URGENT_BUSINESS_STATUSES = new Set(["OVERDUE", "CRITICAL"]);
 const CONTROLLED_BUSINESS_STATUSES = new Set(["OK", "WARNING"]);
 const GENUINE_FINDING_QUALITY_STATUSES = new Set(["incomplete_evidence", "open_findings"]);
+const NON_ORDER_FINDING_TYPES = new Set([
+  "SECTION_NOT_EVALUATED",
+  "SOURCE_UNAVAILABLE",
+  "SOURCE_UNWATCHED",
+  "SOURCE_INCOMPLETE"
+]);
 const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi;
 
 const SEVERITY_ORDER = Object.freeze({ critical: 0, warning: 1, info: 2 });
@@ -160,7 +168,7 @@ export function formatEvidenceCoverage(evidenceCoverage) {
 }
 
 export function isGenuineOrderFinding(finding) {
-  return Boolean(finding && finding.type !== "SECTION_NOT_EVALUATED");
+  return Boolean(finding && !NON_ORDER_FINDING_TYPES.has(finding.type));
 }
 
 export function sortGenuineOrderFindings(findings) {
@@ -236,7 +244,7 @@ export function buildPurchaseOrderOperationalSummary({
       key: finding?.findingId || `${finding?.type || "finding"}-${finding?.severity || "info"}`,
       severity: finding?.severity || "info",
       label: FINDING_TYPE_LABELS[finding?.type] || "Segnalazione strutturale da verificare",
-      description: sanitizePurchaseOrderSummaryText(finding?.description)
+      description: getPurchaseOrderFindingFactualCopy(finding?.type)
     })),
     remainingFindingCount: compactFindings.remainingCount,
     genuineFindingCount: compactFindings.totalCount,

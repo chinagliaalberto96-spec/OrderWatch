@@ -1,6 +1,7 @@
 import { resolveExistingEvidenceRefs } from "./dataQualityInvestigation";
 import { compareEvidenceRefs } from "./observedPurchaseOrderTimeline";
 import { sanitizePurchaseOrderSummaryText } from "./purchaseOrderOperationalSummary";
+import { PURCHASE_ORDER_FINDING_FACTUAL_COPY } from "./purchaseOrderFindingPresentation.js";
 
 export const PURCHASE_ORDER_DIAGNOSTIC_INITIAL_LIMIT = 3;
 
@@ -29,51 +30,51 @@ export const DIAGNOSTIC_ACTION_TAXONOMY = Object.freeze({
     actionCode: "REVIEW_ORDER_LINK_MISSING",
     priorityCode: "OPERATIONAL_PRIORITY",
     title: "Verifica collegamento ordine",
-    reason: "L'ordine collegato alla segnalazione non risulta disponibile nell'organizzazione corrente.",
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.ORDER_LINK_MISSING,
     orderLevel: true
   }),
   DANGLING_PROVENANCE: Object.freeze({
     actionCode: "REVIEW_DANGLING_PROVENANCE",
     priorityCode: "OPERATIONAL_PRIORITY",
     title: "Verifica riferimento evidenza",
-    reason: "Un riferimento di provenienza non può essere collegato all'evidenza attesa."
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.DANGLING_PROVENANCE
   }),
   DOCUMENT_LINK_UNPROVEN: Object.freeze({
     actionCode: "REVIEW_DOCUMENT_LINK",
     priorityCode: "OPERATIONAL_PRIORITY",
     title: "Verifica collegamento documenti",
-    reason: "Il collegamento tra uno o più documenti e l'ordine non è confermato in modo deterministico."
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.DOCUMENT_LINK_UNPROVEN
   }),
   OPERATIONAL_STATE_UNEXPLAINED: Object.freeze({
     actionCode: "REVIEW_OPERATIONAL_STATE_UNEXPLAINED",
     priorityCode: "OPERATIONAL_PRIORITY",
     title: "Verifica stato operativo non spiegato",
-    reason: "Lo stato operativo corrente non è completamente spiegato dai dati disponibili.",
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.OPERATIONAL_STATE_UNEXPLAINED,
     orderLevel: true
   }),
   LINE_WITHOUT_EVIDENCE: Object.freeze({
     actionCode: "REVIEW_LINE_WITHOUT_EVIDENCE",
     priorityCode: "TO_REVIEW",
     title: "Verifica righe senza evidenza",
-    reason: "Una o più righe non hanno una fonte di evidenza collegata."
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.LINE_WITHOUT_EVIDENCE
   }),
   QUANTITY_CONFLICT: Object.freeze({
     actionCode: "REVIEW_QUANTITY_CONFLICT",
     priorityCode: "TO_REVIEW",
     title: "Verifica quantità in conflitto",
-    reason: "Le fonti disponibili riportano quantità differenti per una o più righe."
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.QUANTITY_CONFLICT
   }),
   DATE_CONFLICT: Object.freeze({
     actionCode: "REVIEW_DATE_CONFLICT",
     priorityCode: "TO_REVIEW",
     title: "Verifica date in conflitto",
-    reason: "Le date disponibili non risultano coerenti tra loro."
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.DATE_CONFLICT
   }),
   DUPLICATE_LINE: Object.freeze({
     actionCode: "REVIEW_DUPLICATE_LINE",
     priorityCode: "TO_REVIEW",
     title: "Verifica possibili righe duplicate",
-    reason: "Una o più righe potrebbero rappresentare lo stesso elemento e richiedono una verifica."
+    reason: PURCHASE_ORDER_FINDING_FACTUAL_COPY.DUPLICATE_LINE
   })
 });
 

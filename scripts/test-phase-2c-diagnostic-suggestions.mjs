@@ -52,6 +52,7 @@ function operationalData(overrides = {}) {
 
 try {
   const utility = await vite.ssrLoadModule("/src/utils/purchaseOrderDiagnosticSuggestions.js");
+  const presentation = await vite.ssrLoadModule("/src/utils/purchaseOrderFindingPresentation.js");
   const component = await vite.ssrLoadModule("/src/components/PurchaseOrderOperationalSuggestions.jsx");
   const hook = await vite.ssrLoadModule("/src/hooks/usePurchaseOrderQualityContract.js");
   const focus = await vite.ssrLoadModule("/src/utils/dataQualityInvestigation.js");
@@ -120,6 +121,7 @@ try {
       type
     );
     assert.equal(action.domain, "diagnostic");
+    assert.equal(action.reason, presentation.PURCHASE_ORDER_FINDING_FACTUAL_COPY[type]);
   }
   console.log("PASS");
 
