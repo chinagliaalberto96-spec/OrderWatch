@@ -2,6 +2,7 @@ import React, { useEffect, useReducer, useRef } from 'react';
 import { formatDate } from '../utils/dateUtils';
 import { isExactIdFocused, normalizeFocusIds, resolveExistingEvidenceRefs } from '../utils/dataQualityInvestigation';
 import ObservedPurchaseOrderTimeline from './ObservedPurchaseOrderTimeline';
+import PurchaseOrderOperationalSuggestions from './PurchaseOrderOperationalSuggestions';
 
 /* ============================================================
  * Pure state machine — no React, no fetch. Directly testable.
@@ -420,7 +421,7 @@ function AdvancedVerificationSections({ data }) {
   );
 }
 
-export function OrderOperationalViewContent({ status, error, data, lineFocusIds = [], documentFocusIds = [], evidenceFocusRefs = [] }) {
+export function OrderOperationalViewContent({ status, error, data, businessStatus = null, lineFocusIds = [], documentFocusIds = [], evidenceFocusRefs = [] }) {
   if (status === 'loading') {
     return (
       <div role="status" aria-live="polite" className="py-3 px-2 text-sm">
@@ -525,6 +526,11 @@ export function OrderOperationalViewContent({ status, error, data, lineFocusIds 
       </section>
 
       <ObservedPurchaseOrderTimeline data={d} />
+      <PurchaseOrderOperationalSuggestions
+        key={d.orderId || d.orderNumber || 'order-suggestions'}
+        data={d}
+        businessStatus={businessStatus}
+      />
 
       <section aria-labelledby="ooview-lines">
         <h3 id="ooview-lines" className="text-sm font-semibold">Righe operative canoniche</h3>
@@ -643,6 +649,7 @@ export default function OrderOperationalView({
   orderId,
   fetchOperationalView,
   fetchOverride,
+  businessStatus = null,
   lineFocusIds = [],
   documentFocusIds = [],
   evidenceFocusRefs = []
@@ -681,6 +688,7 @@ export default function OrderOperationalView({
       status={state.status}
       error={state.error}
       data={state.data}
+      businessStatus={businessStatus}
       lineFocusIds={lineFocusIds}
       documentFocusIds={documentFocusIds}
       evidenceFocusRefs={evidenceFocusRefs}

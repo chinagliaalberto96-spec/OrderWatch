@@ -88,15 +88,29 @@ richieste. Ho verificato ciascuna direttamente nel codice sorgente vivo:
    codice** — non esiste alcuna lista chiusa di valori validi né una definizione di quali stati
    contano come "aperto". Usarlo per provare che una riga è ancora aperta significherebbe inventare
    una regola non garantita dal contratto attuale. **Decisione: il trigger usa esclusivamente
-   `remainingQuantity > 0`, mai il campo `status` di riga.** Il controllo numerico esatto,
-   fail-closed su qualunque valore ambiguo, è:
+   `remainingQuantity > 0`, mai il campo `status` di riga.** Il controllo è vincolato al tipo e
+   fail-closed su qualunque valore ambiguo:
 
    ```
-   Number.isFinite(Number(line.remainingQuantity)) && Number(line.remainingQuantity) > 0
+   if (typeof value === "number"):
+     Number.isFinite(value) && value > 0
+
+   else if (typeof value === "string"):
+     trim
+     reject empty
+     validate ordinary decimal/scientific numeric syntax
+     parse
+     Number.isFinite(parsed) && parsed > 0
+
+   else:
+     false
    ```
 
-   Valori `null`, stringa vuota, non numerici o non finiti (`NaN`, `Infinity`) non generano mai
-   un'azione.
+   Restano supportati numeri positivi e stringhe numeriche decimali/scientifiche positive, per
+   esempio `1`, `1.5`, `"1"`, `" 1.5 "` e `"1e2"`. Sono rifiutati `null`, `undefined`, stringhe
+   vuote, valori zero o negativi, `NaN`, `Infinity`, stringhe non numeriche o esadecimali, booleani,
+   array, oggetti, funzioni, simboli e bigint. È vietata la coercizione JavaScript di valori come
+   `true`, `[1]` o `["1"]`: il tipo deve essere verificato prima di qualunque parsing.
 4. **L'ordine non è CLOSED** — confermato leggibile da `businessStatus` (via `getOrderStatus`),
    stesso campo già usato dagli altri tre codici.
 
@@ -106,7 +120,9 @@ di `OrderOperationalView`, **il codice è approvato**, con il trigger per-riga r
 ```
 (dueDate o requiredDate di riga esiste)
   AND daysFromToday(quella data, referenceDate) <= 0 (stesso referenceDate di getOrderStatus)
-  AND Number.isFinite(Number(line.remainingQuantity)) && Number(line.remainingQuantity) > 0
+  AND remainingQuantity è un numero finito positivo
+      OR una stringa non vuota con sintassi decimale/scientifica valida
+         che produce un numero finito positivo
   AND businessStatus dell'ordine !== 'CLOSED'
 ```
 
@@ -132,7 +148,7 @@ dall'ambito di questa fase.
 | Navigazione evidenza | Nessuna (lo stato non ha un riferimento esatto) | Nessuna | Nessuna | Nessuna (le righe non portano un riferimento di evidenza — coerente con Fase 2B.1) |
 | Bucket priorità | Priorità operativa | Priorità operativa | Da verificare | Da verificare |
 | Chiave di deduplica | `orderId:VERIFY_ORDER_STATUS` | `orderId:ATTENTION_OVERDUE` | `orderId:ATTENTION_APPROACHING_DEADLINE` | `orderId:VERIFY_EXPIRED_LINE_COMMITMENT:lineId` (identità per riga, **non** per campo — vedi §7) |
-| Scompare quando | `businessStatus` cambia | `businessStatus` cambia | `businessStatus` cambia | la data non è più scaduta, `remainingQuantity` scende a un valore non `> 0`/non finito, la riga/l'ordine viene chiuso, **oppure l'ordine diventa `OVERDUE`** (soppressione, non scomparsa del trigger sottostante — §7) |
+| Scompare quando | `businessStatus` cambia | `businessStatus` cambia | `businessStatus` cambia | la data non è più scaduta, `remainingQuantity` non è più un numero finito positivo o una stringa decimale/scientifica valida e positiva, la riga/l'ordine viene chiuso, **oppure l'ordine diventa `OVERDUE`** (soppressione, non scomparsa del trigger sottostante — §7) |
 | Copertura live oggi | Sì (ordine `228751`) | Sì (ordine `13542272`) | **Solo fixture** (nessun ordine è oggi `CRITICAL`) | Sì (ordine `0013545497`; su `13542272` il trigger di riga è soddisfatto ma l'azione è soppressa dalla regola di §7 — vedi §13) |
 | Implementabile senza backend | Sì | Sì | Sì | Sì |
 
@@ -332,7 +348,10 @@ fixture.
 2. Il campo `status` di riga (`r.status`) resta un valore opaco senza contratto enum documentato:
    se in futuro si volesse un'azione basata su di esso, serve prima definire quel contratto altrove
    nel codice.
-3. Fase 2C.1B (consolidamento diagnostico) e Fase 2C.2 (persistenza) restano entrambe da
+3. Le stringhe numeriche restano supportate per compatibilità con il contratto corrente, ma solo
+   dopo validazione della sintassi decimale/scientifica ordinaria. Non è ammessa la coercizione
+   JavaScript di booleani, array, oggetti o altri tipi non numerici/non stringa.
+4. Fase 2C.1B (consolidamento diagnostico) e Fase 2C.2 (persistenza) restano entrambe da
    specificare in dettaglio quando verranno approvate.
 
 ---

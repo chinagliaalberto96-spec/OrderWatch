@@ -12,10 +12,20 @@ export function daysBetween(start, end) {
   return Math.ceil((endDate - startDate) / oneDay);
 }
 
-export function daysFromToday(date) {
-  const today = new Date();
+export function daysFromToday(date, referenceDate) {
+  const hasExplicitReferenceDate = referenceDate !== undefined;
+  const today = parseDate(hasExplicitReferenceDate ? referenceDate : new Date());
+  if (!today) return null;
   today.setHours(0, 0, 0, 0);
-  return daysBetween(today, date);
+
+  if (!hasExplicitReferenceDate) {
+    return daysBetween(today, date);
+  }
+
+  const targetDate = parseDate(date);
+  if (!targetDate) return null;
+  targetDate.setHours(0, 0, 0, 0);
+  return daysBetween(today, targetDate);
 }
 
 export function formatDate(value) {

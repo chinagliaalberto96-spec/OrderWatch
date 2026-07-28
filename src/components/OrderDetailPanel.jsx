@@ -161,6 +161,7 @@ export default function OrderDetailPanel({ order, status, terminology, investiga
           <OrderOperationalView
             orderId={order?.id}
             fetchOperationalView={onFetchOrderOperationalView}
+            businessStatus={status}
             lineFocusIds={normalizeFocusIds(investigationContext?.affectedLines)}
             documentFocusIds={normalizeFocusIds(investigationContext?.affectedDocuments)}
             evidenceFocusRefs={investigationContext?.evidenceRefs || []}
