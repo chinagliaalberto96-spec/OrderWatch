@@ -1,8 +1,9 @@
-# Fase 2D.1B — Modello canonico e provenienza per il collegamento ordine di acquisto ↔ progetto (analisi, sola documentazione)
+# Fase 2D.1B — Modello canonico e provenienza per il collegamento ordine di acquisto ↔ progetto
 
-Stato: **proposta, non implementata**. Nessun codice sorgente, test, migrazione, schema database,
-endpoint, adapter, file di pacchetto, configurazione o dato live è stato modificato per produrre
-questo documento. Solo questo file è stato creato/corretto.
+Stato: **specifica approvata; fondamento 2D.1B.1 preparato localmente e non applicato**. La
+migrazione e i test comportamentali restano non committati e non sono stati eseguiti contro alcun
+database configurato o live. Nessun endpoint, adapter, contratto di lettura, dato cliente o
+configurazione live è stato modificato.
 
 Etichette usate in tutto il documento:
 
@@ -25,15 +26,16 @@ legacy) — le estendono e correggono dove necessario.
 
 ## 1. Stato e scopo
 
-**[CONFERMATO]** Branch `feature/pilot-control-check`, working tree pulito. Documento madre:
+**[CONFERMATO]** Branch `feature/pilot-control-check`. Il working tree contiene esclusivamente il
+fondamento 2D.1B.1 locale non committato descritto in apertura. Documento madre:
 [PILOT_PHASE_2D_ORDER_PROJECT_LINKING_PROPOSAL.md](PILOT_PHASE_2D_ORDER_PROJECT_LINKING_PROPOSAL.md).
 Implementazione completata rilevante: Fase 2D.1A (contesto progetto esistente, sola lettura).
 
-**[PROPOSTO]** Fase 2D.1B definisce il modello canonico, provenienza-aware, definitivo per la
-relazione ordine di acquisto↔progetto — chiudendo le decisioni architetturali lasciate aperte da
-Fase 2D.1A prima che qualunque migrazione o percorso di scrittura venga implementato. Questo
-documento **non implementa** Fase 2D.1B; non specifica flussi UI di conferma oltre al contratto
-dati minimo necessario a supportare la futura Fase 2D.1D.
+**[PROPOSTO]** Fase 2D.1B definisce il modello canonico, provenance-aware, definitivo per la
+relazione ordine di acquisto↔progetto. Il solo fondamento additivo 2D.1B.1 è tradotto nella
+migrazione locale non applicata `20260729170041_canonical_project_link_schema_foundation.sql` e
+verificato con PGlite. Resolver, backfill, percorsi di scrittura, API, cutover e flussi UI restano
+rinviati agli incrementi successivi.
 
 ---
 
@@ -229,6 +231,7 @@ giustificato (§7bis), invece di duplicare tutti i dati sorgente grezzi:
 | `valid_from` | Richiesto in 2D.1B.1 |
 | `superseded_at` | Richiesto in 2D.1B.1 |
 | `superseded_by_id` | Richiesto in 2D.1B.1 (self-referencing, con considerazioni di deferrabilità, §12) |
+| `ended_by_decision_id` | Richiesto in 2D.1B.1; decisione immutabile che chiude l'associazione senza sostituzione (§8/§12) |
 | `created_at` / `updated_at` | Richiesto in 2D.1B.1 |
 | `confirmed_by_membership_id` / `confirmation_reason` | **Non più sul collegamento stesso** — spostati su `project_link_decisions` (§7bis), dove appartengono concettualmente |
 | un blob `metadata` generico | Evitato — i campi espliciti coprono ogni caso previsto |
@@ -400,8 +403,10 @@ evento storico, non uno stato aggiornabile. Regole esplicite:
   manuale portano a una conclusione diversa, si **crea una nuova riga** in `project_link_decisions`
   — mai un aggiornamento della riga precedente;
 - il collegamento canonico correlato (`order_project_links`/`line_project_links`) viene quindi
-  **superato tramite il modello append/supersede approvato** (§12), puntando alla nuova decisione
-  tramite `decision_id`;
+  **superato tramite il modello close-then-insert approvato** (§12), puntando alla nuova decisione
+  di creazione tramite `decision_id`; se la conclusione è una disassociazione senza progetto
+  sostitutivo, la nuova decisione viene invece registrata in `ended_by_decision_id` sulla riga
+  storica chiusa e non viene creato alcun collegamento sintetico;
 - la decisione precedente e il collegamento canonico precedente **restano disponibili per la
   ricostruzione storica** — nessuna riga di decisione o di collegamento viene mai cancellata a
   seguito di una nuova decisione.
@@ -493,41 +498,85 @@ identificatore** — ogni risoluzione richiede `organization_id` nel filtro.
 
 ## 12. Supersessione — integrità transazionale (ampliata)
 
-**[PROPOSTO]** Il contratto database deve impedire: due collegamenti espliciti attivi per la stessa
-(organizzazione, ordine); due collegamenti espliciti attivi per la stessa (organizzazione, riga);
-supersessione tra organizzazioni diverse; supersessione tra ordini/righe diversi; auto-supersessione;
-cicli nella catena di supersessione; periodi di validità attivi sovrapposti.
+**[PROPOSTO]** Il contratto database ammette **zero o un solo collegamento esplicito attivo** per
+`(organization_id, order_id)` e per `(organization_id, line_id)`. Zero è valido prima della prima
+assegnazione oppure dopo una chiusura terminale verificabile. Deve restare impossibile avere più di
+un collegamento attivo, superare un collegamento tra tenant o soggetti diversi, auto-superarsi,
+creare cicli nella catena di sostituzione o sovrapporre periodi di validità.
 
-**Transazione/funzione database concettuale** (pseudocodice, nessuna migrazione creata):
+Ogni riga appartiene esattamente a uno dei tre stati:
+
+1. **attiva**: `superseded_at`, `superseded_by_id` ed `ended_by_decision_id` sono `NULL`;
+2. **sostituita**: `superseded_at` e `superseded_by_id` sono valorizzati,
+   `ended_by_decision_id` è `NULL`;
+3. **terminata senza sostituzione**: `superseded_at` ed `ended_by_decision_id` sono valorizzati,
+   `superseded_by_id` è `NULL`.
+
+`project_id` non diventa mai nullable e non esiste alcun progetto sintetico `NO_PROJECT`. La riga
+storica conserva il progetto che era stato assegnato. `decision_id` spiega la creazione
+dell'associazione; `ended_by_decision_id`, diverso da `decision_id`, spiega la sua chiusura senza
+sostituzione.
+
+### Sostituzione: close-then-insert
+
+La sostituzione deve seguire questo ordine, in una sola transazione:
+
 ```
-FUNCTION supersede_and_replace_link(old_link_id, new_link_row):
-  BEGIN TRANSACTION
-    1. validare new_link_row (stessa organization_id di old_link_id; stesso order_id/line_id;
-       project_id valido e stesso-tenant tramite FK composita)
-    2. inserire new_link_row (valid_from = now(), superseded_at = NULL)
-    3. aggiornare old_link_id: superseded_at = now(), superseded_by_id = new_link_row.id
-    4. verificare: esattamente una riga attiva rimane per (organization_id, order_id|line_id)
-  COMMIT
+BEGIN
+  1. creare la nuova decisione immutabile;
+  2. bloccare e validare il collegamento attivo corrente;
+  3. generare/riservare l'id della nuova riga;
+  4. chiudere prima la riga corrente:
+       superseded_at = replacement_timestamp
+       superseded_by_id = reserved_new_link_id
+       ended_by_decision_id = NULL
+  5. inserire la nuova riga attiva con l'id riservato e la nuova decisione;
+  6. verificare che resti esattamente una riga attiva;
+COMMIT
 ```
 
-**Problema di inserimento circolare da `superseded_by_id`**: la nuova riga deve esistere prima che
-la vecchia possa puntarvi, ma la vecchia riga già esiste quando la nuova viene creata — questo non
-è realmente circolare (la sequenza sopra lo risolve: crea prima la nuova riga, poi aggiorna la
-vecchia), ma la FK `superseded_by_id → order_project_links(id)` **deve essere `DEFERRABLE INITIALLY
-DEFERRED`** solo se le due operazioni (2) e (3) avvenissero in un ordine che violasse
-temporaneamente il vincolo all'interno della stessa transazione — con la sequenza proposta sopra
-(inserisci la nuova riga PRIMA di aggiornare il puntatore sulla vecchia) **non è necessaria alcuna
-FK deferrabile**, perché al momento del passo 3 la riga referenziata da `superseded_by_id` esiste
-già. La deferrabilità resta comunque **raccomandata come difesa aggiuntiva** se un'implementazione
-futura scegliesse un ordine di operazioni diverso. **Decisione aperta**: se implementare questo
-come funzione PL/pgSQL o come logica applicativa con transazione esplicita (§25).
+La FK composita same-subject su `superseded_by_id` deve restare **`DEFERRABLE INITIALLY
+DEFERRED`**: al passo 4 punta intenzionalmente all'id riservato che verrà inserito al passo 5 nella
+stessa transazione. La deferrabilità è richiesta da questa sequenza. La sequenza inversa
+insert-then-close non è valida perché l'indice parziale che impone al massimo una riga attiva è
+immediato e rifiuta la seconda riga prima che la precedente venga chiusa. Qualunque errore
+annulla l'intera transazione e preserva il collegamento attivo precedente.
 
-**Relazione con l'immutabilità delle decisioni (§8)**: la supersessione di un collegamento canonico
-avviene **sempre** in coppia con la creazione di una nuova `project_link_decisions` — non esiste un
-percorso in cui un collegamento viene superato senza una nuova decisione che lo giustifichi, e non
-esiste un percorso in cui una decisione esistente viene modificata al posto di crearne una nuova. La
-decisione e il collegamento superati restano entrambi leggibili per la ricostruzione storica
-(nessuna cancellazione, solo `superseded_at`/`superseded_by_id`).
+### Chiusura terminale senza sostituzione
+
+La disassociazione verificabile deve seguire una transazione distinta:
+
+```
+BEGIN
+  1. creare la decisione immutabile di chiusura;
+  2. bloccare e validare il collegamento attivo corrente;
+  3. aggiornare la riga corrente:
+       superseded_at = ending_timestamp
+       superseded_by_id = NULL
+       ended_by_decision_id = ending_decision_id
+  4. verificare che restino zero righe attive;
+COMMIT
+```
+
+Questa transizione consente di ritirare un override di riga e ripristinare in futuro
+l'ereditarietà dal collegamento d'ordine. Una successiva assegnazione crea una nuova decisione e
+una nuova riga attiva; non riscrive e non si aggancia artificialmente all'episodio terminato.
+
+### Confine di scrittura controllato
+
+**[DECISIONE CHIUSA]** Nessun writer di Fase 2D.1B.2–2D.1B.4 può comporre ad hoc le istruzioni
+multi-statement di sostituzione o chiusura terminale. Prima di autorizzare il primo percorso di
+scrittura deve esistere **un'unica funzione database interna o un servizio transazionale
+equivalente sottoposto a review** che possieda: locking della riga, creazione/riferimento della
+decisione, close-then-insert, chiusura terminale, validazione same-subject e tenant, gestione della
+concorrenza e rollback. Il meccanismo di invocazione resta aperto; l'esistenza di un solo confine
+transazionale controllato non è più opzionale. Tale funzione/servizio è rinviata e non viene
+implementata in 2D.1B.1.
+
+**Relazione con l'immutabilità delle decisioni (§8)**: una sostituzione crea una nuova decisione
+di creazione per la nuova riga; una chiusura terminale crea una nuova decisione di fine e la
+registra in `ended_by_decision_id`. Nessuna decisione esistente viene modificata. Decisioni e
+collegamenti chiusi restano leggibili per la ricostruzione storica.
 
 ---
 
@@ -542,6 +591,9 @@ collegamento di riga esplicito futuro nascerà **solo** da un'osservazione/confe
 all'introduzione di questo schema — mai da un backfill storico di riga. Derivazione multi-progetto,
 ordinamento deterministico, comportamento con zero righe, progetto inattivo, collegamento superato:
 invariati rispetto alla revisione precedente. **Nessuna allocazione di riga singola su più progetti.**
+La chiusura terminale di un override esplicito di riga lascia zero collegamenti di riga attivi:
+questo è il fondamento strutturale affinché, dopo il cutover 2D.1B.4, la riga possa tornare a
+ereditare il default d'ordine senza cancellare la precedente assegnazione storica.
 
 ---
 
@@ -580,7 +632,8 @@ progetto o identificatore esterno.
 
 ## 16. Vincoli e indici concettuali
 
-**[PROPOSTO]**, pseudocodice concettuale aggiornato, nessuna migrazione creata:
+**[IMPLEMENTATO LOCALMENTE, NON APPLICATO]** Contratto strutturale riflesso nella migrazione
+2D.1B.1 locale e verificato tramite PGlite:
 
 ```
 CREATE TABLE order_project_links (
@@ -591,14 +644,30 @@ CREATE TABLE order_project_links (
   decision_id UUID NOT NULL,
   valid_from TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   superseded_at TIMESTAMPTZ,
-  superseded_by_id UUID REFERENCES order_project_links(id),
+  superseded_by_id UUID,
+  ended_by_decision_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
   FOREIGN KEY (organization_id, order_id) REFERENCES orders(organization_id, id),
   FOREIGN KEY (organization_id, project_id) REFERENCES projects(organization_id, id),
   FOREIGN KEY (organization_id, decision_id) REFERENCES project_link_decisions(organization_id, id),
-  CHECK (superseded_by_id IS NULL OR superseded_by_id <> id)
+  FOREIGN KEY (organization_id, ended_by_decision_id)
+    REFERENCES project_link_decisions(organization_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (organization_id, order_id, superseded_by_id)
+    REFERENCES order_project_links(organization_id, order_id, id)
+    ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED,
+  CHECK (superseded_by_id IS NULL OR superseded_by_id <> id),
+  CHECK (ended_by_decision_id IS NULL OR ended_by_decision_id <> decision_id),
+  CHECK (
+    (superseded_at IS NULL AND superseded_by_id IS NULL AND ended_by_decision_id IS NULL)
+    OR
+    (superseded_at IS NOT NULL AND superseded_by_id IS NOT NULL
+      AND ended_by_decision_id IS NULL AND superseded_at >= valid_from)
+    OR
+    (superseded_at IS NOT NULL AND superseded_by_id IS NULL
+      AND ended_by_decision_id IS NOT NULL AND superseded_at >= valid_from)
+  )
 );
 ALTER TABLE order_project_links ENABLE ROW LEVEL SECURITY;
 
@@ -616,11 +685,11 @@ CREATE INDEX idx_order_project_links_order ON order_project_links(organization_i
 -- padre dove applicabile.
 ```
 
-Copertura richiesta: unicità scoped per organizzazione; una sola voce attiva per default d'ordine;
-una sola voce attiva per collegamento di riga; coerenza di supersessione; stessa-organizzazione
-garantita dalle FK composite (già supportate dagli indici esistenti); lookup per progetto attivo,
-per ordine, per riga (`purchase_order_lines.id`), per identificatore sorgente; backfill
-deterministico.
+Copertura richiesta: unicità scoped per organizzazione; **zero o una** voce attiva per default
+d'ordine; **zero o una** voce attiva per collegamento di riga; sostituzione e chiusura terminale
+distinte; decisione di fine tenant-safe; stessa-organizzazione garantita dalle FK composite (già
+supportate dagli indici esistenti); lookup per progetto attivo, per ordine, per riga
+(`purchase_order_lines.id`), per identificatore sorgente; backfill deterministico.
 
 ---
 
@@ -762,8 +831,12 @@ incremento futuro); query con service-role key che comunque richiede il filtro a
 `organization_id` (test che verifica la disciplina applicativa, non la sola presenza di RLS);
 supersessione dello stesso soggetto; rifiuto di supersessione tra soggetti diversi; rifiuto di
 auto-supersessione; rifiuto di un secondo collegamento attivo duplicato; rollback che lascia attivo
-il collegamento precedente; osservazione con zero candidati; osservazione con un candidato;
-osservazione con più candidati; un candidato non è mai trattato come canonico; un collegamento
+il collegamento precedente; sostituzione close-then-insert con FK differita; chiusura terminale
+ordine e riga con decisione distinta e tenant-safe; zero collegamenti attivi dopo chiusura;
+ritiro dell'override di riga mentre il default d'ordine resta attivo; nuova assegnazione dopo un
+intervallo zero-active; rifiuto di stati parziali, doppio esito e mutazione di righe chiuse;
+rollback di una chiusura fallita che preserva la riga attiva; osservazione con zero candidati;
+osservazione con un candidato; osservazione con più candidati; un candidato non è mai trattato come canonico; un collegamento
 supportato da più osservazioni; origine di backfill legacy `IMPORTED_HISTORICAL`; sincronizzazione
 di compatibilità ripetuta resta idempotente; nuove scritture legacy catturate durante il periodo di
 compatibilità; scritture dirette legacy rifiutate dopo il cutover; `entity_aliases` mai consultata
@@ -802,11 +875,13 @@ processo automatico produce due collegamenti canonici attivi.
 
 - **2D.1B.1 — Fondamento di schema**: identità di riga persistita confermata (`purchase_order_lines`,
   §2.3); tabelle di collegamento canoniche (`order_project_links`/`line_project_links`); vincoli
-  tenant (FK composite, riusando gli indici già esistenti); vincoli di supersessione; **nessun
-  backfill; nessun resolver; nessun cambio API.**
+  tenant (FK composite, riusando gli indici già esistenti); vincoli di sostituzione e chiusura
+  terminale; cardinalità zero-o-uno; **nessun backfill; nessun resolver; nessun cambio API.**
 - **2D.1B.2 — Osservazioni e backfill storico**: modello di osservazione (§7bis-A); import di
   `project_id` legacy validi come `IMPORTED_HISTORICAL`; osservazioni solo-codice; quarantena dei
-  conflitti; sincronizzazione idempotente continua (§18bis); **nessuno switch di API pubblica.**
+  conflitti; sincronizzazione idempotente continua (§18bis); introduzione del confine
+  transazionale controllato obbligatorio prima di qualunque writer (§12); **nessuno switch di API
+  pubblica.**
 - **2D.1B.3 — Identificatori esterni confermati e fonti fidate**: `project_external_identifiers`;
   `trusted_project_source_fields`; risoluzione esatta deterministica; generazione di candidati;
   **nessuna conferma IA; nessuno switch di API pubblica.**
@@ -829,7 +904,8 @@ Progetti (2D.2); allocazione di riga singola su più progetti; storico di classi
 procurement come incremento separato (§14/§21); tabelle di entitlement (2E); retrofit di RLS sulle
 tabelle esistenti; uso di `entity_aliases` per candidati (richiede contratto approvato separato,
 §10); integrazione costo/budget; qualunque scrittura di dati live; qualunque migrazione SQL
-eseguita.
+eseguita; implementazione della funzione/servizio transazionale controllato per sostituzione e
+chiusura terminale (§12).
 
 ## 23. Rischi
 
@@ -839,6 +915,8 @@ eseguita.
   cambiamento futuro del modello di connessione richiederebbe una revisione separata.
 - Il meccanismo esatto (trigger vs. job) per la sincronizzazione di compatibilità continua non è
   ancora scelto.
+- La funzione/servizio transazionale controllato richiesto da §12 non è ancora implementato:
+  nessun writer di 2D.1B.2–2D.1B.4 può essere autorizzato prima della sua review.
 - La semplificazione implementativa del modello osservazione/candidato/decisione (§7bis, nota
   finale) rischia di essere applicata in modo da perdere la distinzione concettuale se non
   attentamente revisionata in fase di implementazione.
@@ -867,6 +945,14 @@ eseguita.
 - Osservazioni automatiche in conflitto con un collegamento manuale attivo vengono preservate e
   messe in quarantena per una risoluzione successiva, senza mai alterare il contesto progetto
   operativo corrente.
+- La cardinalità universale dei collegamenti espliciti è zero-o-uno: una chiusura terminale
+  verificabile può lasciare zero righe attive senza cancellare lo storico.
+- `superseded_by_id` indica esclusivamente una sostituzione; `ended_by_decision_id` indica
+  esclusivamente una chiusura senza sostituzione.
+- La sostituzione usa close-then-insert con FK same-subject differita; insert-then-close è
+  incompatibile con l'indice parziale immediato.
+- Prima di ogni writer deve esistere un unico confine transazionale controllato per locking,
+  decisioni, concorrenza e rollback; non sono ammessi flussi SQL multi-statement ad hoc.
 
 ## 25. Decisioni aperte residue
 
@@ -875,7 +961,8 @@ eseguita.
    implementazione, mantenendo la distinzione concettuale).
 2. Meccanismo esatto di sincronizzazione delle proiezioni di compatibilità legacy (trigger vs.
    job).
-3. Meccanismo esatto (funzione database vs. transazione applicativa) per la supersessione (§12).
+3. Forma e meccanismo di invocazione del confine transazionale controllato obbligatorio
+   (funzione database interna o servizio transazionale equivalente, §12).
 4. Forma esatta della chiave/identità di esecuzione del backfill (§18, punto 9).
 5. Se e quando scrivere le policy RLS complete per le nuove tabelle (oltre alla sola abilitazione),
    e se estendere lo stesso lavoro a `projects`/`orders` (fuori perimetro qui).
@@ -900,13 +987,18 @@ indipendentemente revisionabili (§21); identifica correttamente l'entità riga 
 un'osservazione come stato di dominio corrente (§7bis-A)**; **nessuna sincronizzazione automatica
 può sostituire un collegamento confermato manualmente (§18bis)**; **i fatti automatici in conflitto
 vengono preservati senza alterare il contesto canonico (§18bis)**; **ogni cambio di stato canonico
-crea una nuova decisione controllata e una nuova versione di collegamento superato (§8/§12)**; **la
-ricostruzione storica resta sempre possibile (§8/§12)**; il perimetro di implementazione resta
-esclusivamente documentale (§27).
+crea una nuova decisione controllata e una nuova versione di collegamento chiuso (§8/§12)**;
+**supporta zero o un collegamento attivo, inclusa la disassociazione terminale verificabile e la
+successiva riattivazione (§12)**; **la chiusura di un override di riga prepara il ritorno
+all'ereditarietà d'ordine senza cancellare lo storico (§13)**; **la sostituzione usa
+close-then-insert con FK differita e rollback preservante (§12)**; **nessun writer futuro può
+operare fuori dal confine transazionale controllato (§12/§21)**; **la ricostruzione storica resta
+sempre possibile (§8/§12)**.
 
-## 27. Conferma che non è stata eseguita alcuna implementazione
+## 27. Conferma di sicurezza dell'implementazione locale
 
-Nessun file sorgente, test, migrazione, schema database, endpoint, adapter, file di pacchetto,
-configurazione o dato live è stato modificato. Ogni verifica live è stata eseguita in sola lettura
-tramite un server di sviluppo temporaneo, arrestato subito dopo. È stato modificato/corretto
-esattamente un file: `docs/product/PILOT_PHASE_2D_1B_CANONICAL_PROJECT_LINKS_PROPOSAL.md`.
+Il fondamento di schema 2D.1B.1 è preparato esclusivamente come migrazione locale non applicata e
+test comportamentale PGlite. Nessuna scrittura è stata eseguita su Supabase configurato o live;
+nessun endpoint, adapter, contratto di lettura, dato cliente o configurazione è stato modificato;
+nessun backfill o writer applicativo è incluso. La migrazione crea tabelle vuote e additive quando
+verrà autorizzata in una fase successiva.

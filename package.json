@@ -20,6 +20,7 @@
     "platform-admin": "node scripts/provision-platform-admin.js",
     "test:receiving-api": "node --env-file=.env.local scripts/test-receiving-api.js",
     "test:procurement": "node scripts/test-procurement-model.mjs",
+    "test:phase-2d-schema": "node scripts/test-phase-2d-canonical-project-link-schema.mjs",
     "test:contractwatch": "node --env-file=.env.local scripts/test-contractwatch-foundation.js && node --env-file=.env.local scripts/test-contractwatch-api.js && node --env-file=.env.local scripts/test-contractwatch-sal-billing.js"
   },
   "dependencies": {
@@ -34,6 +35,7 @@
     "vite": "^7.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.4",
     "@eslint/js": "^9.39.5",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.0.0",
