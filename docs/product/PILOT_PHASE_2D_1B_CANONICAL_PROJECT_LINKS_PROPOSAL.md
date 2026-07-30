@@ -806,6 +806,16 @@ sostituire un collegamento `IMPORTED_HISTORICAL` solo quando le regole determini
 lo consentono esplicitamente; nessun processo automatico può produrre due collegamenti canonici
 attivi contemporaneamente.
 
+**[IMPLEMENTATO NEL FONDAMENTO 2D.1B.1 — hardening successivo]** La protezione non dipende
+soltanto dai futuri writer: un vincolo database differito impedisce che un collegamento attivo
+aperto da `MANUAL_CONFIRMATION`, sia a livello ordine sia a livello riga, venga chiuso,
+ritirato o sostituito da una decisione `SOURCE_NATIVE_STRUCTURED`,
+`EXACT_TRUSTED_REFERENCE` o `IMPORTED_HISTORICAL`. Una nuova `MANUAL_CONFIRMATION` può invece
+chiudere o sostituire una decisione manuale; una decisione manuale può inoltre sostituire una
+decisione automatica. Questo hardening protegge esclusivamente `MANUAL_CONFIRMATION` dal
+superamento non manuale: non introduce una gerarchia completa tra le altre origini e non
+implementa osservazioni, backfill, registri fonte o cutover di 2D.1B.2–2D.1B.4.
+
 ---
 
 ## 19. Impatto su Graphic Center Group
