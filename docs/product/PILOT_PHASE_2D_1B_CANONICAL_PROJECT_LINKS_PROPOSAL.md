@@ -1,9 +1,9 @@
 # Fase 2D.1B — Modello canonico e provenienza per il collegamento ordine di acquisto ↔ progetto
 
-Stato: **specifica approvata; fondamento 2D.1B.1 preparato localmente e non applicato**. La
-migrazione e i test comportamentali restano non committati e non sono stati eseguiti contro alcun
-database configurato o live. Nessun endpoint, adapter, contratto di lettura, dato cliente o
-configurazione live è stato modificato.
+Stato: **specifica approvata; fondamento 2D.1B.1 esistente e hardening locale del ledger delle
+operazioni non applicato**. La migrazione additiva del ledger e il relativo test comportamentale
+restano non committati e non sono stati eseguiti contro alcun database configurato o live. Nessun
+endpoint, adapter, contratto di lettura, dato cliente o configurazione live è stato modificato.
 
 Etichette usate in tutto il documento:
 
@@ -26,15 +26,17 @@ legacy) — le estendono e correggono dove necessario.
 
 ## 1. Stato e scopo
 
-**[CONFERMATO]** Branch `feature/pilot-control-check`. Il working tree contiene esclusivamente il
-fondamento 2D.1B.1 locale non committato descritto in apertura. Documento madre:
+**[CONFERMATO]** Branch `feature/pilot-control-check`. Il presente documento descrive il
+fondamento 2D.1B.1 e il relativo hardening locale del ledger indicato in apertura. Documento madre:
 [PILOT_PHASE_2D_ORDER_PROJECT_LINKING_PROPOSAL.md](PILOT_PHASE_2D_ORDER_PROJECT_LINKING_PROPOSAL.md).
 Implementazione completata rilevante: Fase 2D.1A (contesto progetto esistente, sola lettura).
 
 **[PROPOSTO]** Fase 2D.1B definisce il modello canonico, provenance-aware, definitivo per la
-relazione ordine di acquisto↔progetto. Il solo fondamento additivo 2D.1B.1 è tradotto nella
-migrazione locale non applicata `20260729170041_canonical_project_link_schema_foundation.sql` e
-verificato con PGlite. Resolver, backfill, percorsi di scrittura, API, cutover e flussi UI restano
+relazione ordine di acquisto↔progetto. Il fondamento additivo 2D.1B.1 è tradotto nelle migrazioni
+`20260729170041_canonical_project_link_schema_foundation.sql` e
+`20260730210335_enforce_manual_project_link_precedence.sql`; l'hardening locale non applicato del
+ledger è nella migrazione `20260731102910_canonical_project_link_operation_ledger.sql`. Tutte sono
+verificate con PGlite in ordine. Resolver, backfill, writer, API, cutover e flussi UI restano
 rinviati agli incrementi successivi.
 
 ---
@@ -573,6 +575,44 @@ concorrenza e rollback. Il meccanismo di invocazione resta aperto; l'esistenza d
 transazionale controllato non è più opzionale. Tale funzione/servizio è rinviata e non viene
 implementata in 2D.1B.1.
 
+### Ledger persistente di idempotenza e recupero esito
+
+**[IMPLEMENTATO LOCALMENTE, NON APPLICATO]** La tabella additiva
+`project_link_operations` registra esclusivamente l'identità della richiesta e il suo esito
+recuperabile per il futuro writer canonico. È distinta da
+`project_reference_observations`: il ledger non conserva evidenze sorgente, confidence,
+riferimenti estratti, candidati, corpi email o contenuto cliente e non costituisce mai una
+decisione o un collegamento canonico.
+
+La preallocazione degli UUID di decisione e collegamento non è sufficiente da sola: un doppio
+invio, il riavvio del processo o la perdita della connessione durante o dopo `COMMIT` non
+permettono al chiamante di distinguere in modo affidabile tra operazione mai eseguita, eseguita o
+ancora da riconciliare. Per questo il ledger applica il seguente contratto:
+
+- `operation_key` è unica dentro `organization_id`;
+- stessa chiave e stesso `request_fingerprint` identificano lo stesso comando logico: il writer
+  futuro deve leggere e restituire la riga e l'esito già registrati;
+- stessa chiave con fingerprint diverso è un mismatch di idempotenza: il vincolo univoco rifiuta
+  il nuovo inserimento e la riga esistente non viene mai riscritta;
+- `organization_id`, soggetto, tipo operazione, chiave, fingerprint, progetto richiesto e stato
+  atteso sono fatti immutabili della richiesta;
+- `operation_type` conserva il tipo di comando ricevuto, mentre `lifecycle_operation` conserva
+  l'operazione canonica effettiva (`CREATE`, `REPLACE`, `END` o `REACTIVATE`) anche per i wrapper
+  manuali e automatici;
+- gli stati minimi sono `CLAIMED`, `AMBIGUOUS`, `COMPLETED` e `FAILED`. Le sole transizioni sono
+  `CLAIMED -> COMPLETED|FAILED|AMBIGUOUS` e `AMBIGUOUS -> COMPLETED|FAILED`;
+- `COMPLETED` e `FAILED` sono terminali e interamente immutabili. Gli identificatori risultato
+  già valorizzati non possono essere cambiati o rimossi;
+- una perdita di connessione con esito incerto può lasciare `AMBIGUOUS`; il recupero avviene
+  cercando la stessa chiave tenant-scoped e riconciliando quella riga, senza ripetere alla cieca
+  la mutazione canonica;
+- una riga `FAILED` o `AMBIGUOUS` non dimostra da sola che lo stato canonico sia cambiato;
+- nessuna riga del ledger autorizza, promuove o applica un collegamento progetto.
+
+Il futuro writer deve reclamare o leggere l'operazione, applicare la mutazione canonica e
+persistire l'esito finale nella **stessa transazione e connessione database**. Questa fondazione
+non implementa il writer, una RPC, retry automatici, code o promozioni automatiche.
+
 **Relazione con l'immutabilità delle decisioni (§8)**: una sostituzione crea una nuova decisione
 di creazione per la nuova riga; una chiusura terminale crea una nuova decisione di fine e la
 registra in `ended_by_decision_id`. Nessuna decisione esistente viene modificata. Decisioni e
@@ -855,6 +895,13 @@ di API in 2D.1B.1–2D.1B.3; comportamento di Fase 2D.1A preservato fino a 2D.1B
 grezzo in UI; output deterministico indipendente dall'ordine dell'array sorgente. Test di vincolo
 database separati dai test di utilità pura.
 
+*Ledger delle operazioni idempotenti (§12)*: applicazione delle migrazioni reali in ordine;
+creazione di un'operazione; lookup same-key/same-fingerprint; rifiuto
+same-key/different-fingerprint; unicità della chiave per organizzazione; transizioni valide e
+illegali; immutabilità degli esiti terminali e degli identificatori risultato; riferimenti
+tenant-safe a soggetto, progetto, decisione e collegamenti; nessun `DELETE`; rollback senza righe
+residue; RLS attiva e privilegi coerenti con il fondamento B.1.
+
 **Requisiti di test aggiunti in questo chiarimento finale**:
 
 *Immutabilità delle decisioni (§8)*: una decisione esistente resta invariata dopo che ne viene
@@ -886,7 +933,8 @@ processo automatico produce due collegamenti canonici attivi.
 - **2D.1B.1 — Fondamento di schema**: identità di riga persistita confermata (`purchase_order_lines`,
   §2.3); tabelle di collegamento canoniche (`order_project_links`/`line_project_links`); vincoli
   tenant (FK composite, riusando gli indici già esistenti); vincoli di sostituzione e chiusura
-  terminale; cardinalità zero-o-uno; **nessun backfill; nessun resolver; nessun cambio API.**
+  terminale; cardinalità zero-o-uno; ledger persistente delle operazioni idempotenti e del loro
+  esito recuperabile (§12); **nessun backfill; nessun resolver; nessun writer; nessun cambio API.**
 - **2D.1B.2 — Osservazioni e backfill storico**: modello di osservazione (§7bis-A); import di
   `project_id` legacy validi come `IMPORTED_HISTORICAL`; osservazioni solo-codice; quarantena dei
   conflitti; sincronizzazione idempotente continua (§18bis); introduzione del confine
@@ -927,6 +975,9 @@ chiusura terminale (§12).
   ancora scelto.
 - La funzione/servizio transazionale controllato richiesto da §12 non è ancora implementato:
   nessun writer di 2D.1B.2–2D.1B.4 può essere autorizzato prima della sua review.
+- Il ledger è verificato solo localmente con PGlite: concorrenza reale, comportamento
+  `service_role`/BYPASSRLS, policy del progetto ospitato, errore di connessione attorno a `COMMIT` e
+  atomicità del futuro writer devono ancora essere validati su un Supabase non di produzione.
 - La semplificazione implementativa del modello osservazione/candidato/decisione (§7bis, nota
   finale) rischia di essere applicata in modo da perdere la distinzione concettuale se non
   attentamente revisionata in fase di implementazione.
@@ -963,6 +1014,11 @@ chiusura terminale (§12).
   incompatibile con l'indice parziale immediato.
 - Prima di ogni writer deve esistere un unico confine transazionale controllato per locking,
   decisioni, concorrenza e rollback; non sono ammessi flussi SQL multi-statement ad hoc.
+- Le operazioni del writer hanno identità persistente tenant-scoped: stessa chiave e stesso
+  fingerprint recuperano il comando esistente; stessa chiave e fingerprint diverso sono sempre
+  un mismatch e non mutano l'operazione precedente.
+- Il ledger delle operazioni resta distinto dalle osservazioni sorgente e non autorizza né
+  promuove collegamenti canonici.
 
 ## 25. Decisioni aperte residue
 
@@ -1003,12 +1059,22 @@ successiva riattivazione (§12)**; **la chiusura di un override di riga prepara 
 all'ereditarietà d'ordine senza cancellare lo storico (§13)**; **la sostituzione usa
 close-then-insert con FK differita e rollback preservante (§12)**; **nessun writer futuro può
 operare fuori dal confine transazionale controllato (§12/§21)**; **la ricostruzione storica resta
-sempre possibile (§8/§12)**.
+sempre possibile (§8/§12)**; **ogni comando del writer può essere identificato e recuperato senza
+confondere l'operazione con un'osservazione sorgente (§12)**; **il riuso della stessa chiave con
+una richiesta diversa fallisce senza riscrivere il ledger (§12)**.
 
 ## 27. Conferma di sicurezza dell'implementazione locale
 
-Il fondamento di schema 2D.1B.1 è preparato esclusivamente come migrazione locale non applicata e
-test comportamentale PGlite. Nessuna scrittura è stata eseguita su Supabase configurato o live;
-nessun endpoint, adapter, contratto di lettura, dato cliente o configurazione è stato modificato;
-nessun backfill o writer applicativo è incluso. La migrazione crea tabelle vuote e additive quando
+L'hardening del fondamento 2D.1B.1 aggiunge esclusivamente una migrazione locale non applicata e un
+test comportamentale PGlite per `project_link_operations`. Nessuna scrittura è stata eseguita su
+Supabase configurato o live; nessun endpoint, adapter, contratto di lettura, dato cliente o
+configurazione è stato modificato; nessun backfill, writer applicativo, osservazione o promozione
+automatica è incluso. La migrazione crea una tabella vuota e oggetti di vincolo additivi quando
 verrà autorizzata in una fase successiva.
+
+Prima di dichiarare il ledger ospitato-validato restano obbligatorie, in un progetto Supabase
+isolato non di produzione: applicazione sulla catena completa di migrazioni; verifica reale di
+RLS/grant con `anon`, `authenticated` e `service_role`; concorrenza same-key con un solo vincitore;
+transazione atomica claim-mutazione-esito; recupero dopo esito di commit ambiguo; conferma degli
+SQLSTATE e dei vincoli sotto PostgreSQL ospitato. PGlite non prova fedelmente BYPASSRLS,
+concorrenza multi-sessione o perdita di connessione attorno al commit.
