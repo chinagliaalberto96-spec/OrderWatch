@@ -3,8 +3,16 @@ import { WRITER_OUTCOME } from "./projectLinkWriterResult.js";
 /**
  * What a future writer should do with the ledger row for a given attempt.
  *
+ * The writer is a single atomic transaction: claim, decision, canonical
+ * mutation and terminal ledger update all commit together or not at all
+ * (see the architecture-decision record accompanying this correction). A
+ * fresh connection can therefore only ever observe the whole transaction
+ * committed (terminal ledger row + canonical mutation present) or the whole
+ * transaction absent -- never a durable CLAIMED row missing its terminal
+ * update. There is consequently no database write this module can ever
+ * correctly instruct for an ambiguous-commit attempt; see RECOVER_BY_LOOKUP.
+ *
  * PERSIST_TERMINAL         -- write a terminal COMPLETED or FAILED row.
- * PERSIST_AMBIGUOUS        -- write an AMBIGUOUS row (commit outcome unknown).
  * RETAIN_CLAIMED           -- leave the existing CLAIMED row untouched; the
  *                              conflict was on the canonical link tables, not
  *                              on the ledger's own operation identity, so the
@@ -17,12 +25,46 @@ import { WRITER_OUTCOME } from "./projectLinkWriterResult.js";
  *                              retry means starting a fresh transaction
  *                              (which may reuse the same operation_key/
  *                              request_fingerprint, since nothing persisted).
+ * RECOVER_BY_LOOKUP        -- this specific attempt's outcome is unknown
+ *                              (its own COMMIT acknowledgement was lost).
+ *                              Perform NO ledger write from this connection.
+ *                              The true outcome must instead be resolved on
+ *                              a new connection by looking up the existing
+ *                              row for (organizationId, operationKey,
+ *                              requestFingerprint) -- it will already be
+ *                              either a terminal row (the transaction did
+ *                              commit) or absent (it did not). Never write a
+ *                              database AMBIGUOUS status from this action.
+ * NO_LEDGER_WRITE          -- no ledger mutation of any kind applies to this
+ *                              attempt: either it is a replay of an
+ *                              already-terminal result (nothing new
+ *                              happened), or it was rejected before any
+ *                              claim/mutation was attempted (idempotency-key
+ *                              reuse with a different fingerprint).
+ *
+ * RECOVERY INVARIANT (not implemented by this module -- documented here
+ * because RECOVER_BY_LOOKUP is the action that makes it load-bearing):
+ * a no-row lookup performed immediately after a lost RPC/COMMIT response
+ * does NOT, by itself, prove the original attempt's transaction has already
+ * rolled back -- that first attempt's transaction may still genuinely be in
+ * flight (still holding its claim lock, not yet at COMMIT) at the exact
+ * moment a recovery lookup runs. A future recovery implementation must
+ * therefore never treat "no row yet" as a green light to start a second,
+ * independent write for the same (organizationId, operationKey) without
+ * either (a) bounded polling that re-checks after a grace period, or
+ * (b) idempotently re-invoking the very same write with the same
+ * organizationId, operationKey and requestFingerprint and letting
+ * uniq_project_link_operations_org_key serialize any genuine overlap
+ * between the two attempts. This module performs no such polling or
+ * re-invocation itself -- it only ever returns a classification, never a
+ * write, for the ambiguous case.
  */
 export const LEDGER_ACTION = Object.freeze({
   PERSIST_TERMINAL: "PERSIST_TERMINAL",
-  PERSIST_AMBIGUOUS: "PERSIST_AMBIGUOUS",
   RETAIN_CLAIMED: "RETAIN_CLAIMED",
-  TRANSACTION_ROLLED_BACK: "TRANSACTION_ROLLED_BACK"
+  TRANSACTION_ROLLED_BACK: "TRANSACTION_ROLLED_BACK",
+  RECOVER_BY_LOOKUP: "RECOVER_BY_LOOKUP",
+  NO_LEDGER_WRITE: "NO_LEDGER_WRITE"
 });
 
 const LEDGER_STATUS = Object.freeze({
@@ -73,8 +115,29 @@ export function mapResultToLedgerState(result) {
     decisionId = null,
     priorLinkId = null,
     resultLinkId = null,
-    safeDiagnosticCode = null
+    safeDiagnosticCode = null,
+    replayed = false
   } = result;
+
+  // Takes precedence over every outcome-specific branch below: a replayed
+  // result means this attempt did no new work at all -- it only
+  // reconstructed and returned an already-persisted terminal outcome, so no
+  // ledger status transition is ever implied, regardless of which terminal
+  // outcome was replayed. Only projectLinkWriterResult.js's own
+  // REPLAY_ELIGIBLE_OUTCOMES may legally carry replayed === true, but this
+  // check is unconditional here as a defensive default: it can never be
+  // less safe than the outcome-specific mapping it preempts.
+  if (replayed === true) {
+    return Object.freeze({
+      ledgerAction: LEDGER_ACTION.NO_LEDGER_WRITE,
+      status: null,
+      finalOutcome: outcome,
+      lastErrorClass: null,
+      decisionId,
+      priorLinkId,
+      resultLinkId
+    });
+  }
 
   switch (outcome) {
     case WRITER_OUTCOME.SUCCESS_CREATED:
@@ -93,14 +156,39 @@ export function mapResultToLedgerState(result) {
       });
 
     case WRITER_OUTCOME.AMBIGUOUS_COMMIT:
+      // This attempt's own COMMIT acknowledgement was lost -- its true
+      // outcome is unknown to this connection and MUST NOT be guessed at or
+      // written here. See the LEDGER_ACTION doc comment: under the
+      // single-transaction writer, a durable CLAIMED row missing its
+      // terminal update is not a reachable database state, so there is no
+      // row for a later connection to "convert" to AMBIGUOUS either. The
+      // only correct action is a durable lookup, by
+      // (organizationId, operationKey, requestFingerprint), on a new
+      // connection/attempt -- never a write from this one.
       return Object.freeze({
-        ledgerAction: LEDGER_ACTION.PERSIST_AMBIGUOUS,
-        status: LEDGER_STATUS.AMBIGUOUS,
+        ledgerAction: LEDGER_ACTION.RECOVER_BY_LOOKUP,
+        status: null,
         finalOutcome: null,
-        lastErrorClass: CANONICAL_ERROR_CLASS.AMBIGUOUS_COMMIT,
-        decisionId,
-        priorLinkId,
-        resultLinkId
+        lastErrorClass: null,
+        decisionId: null,
+        priorLinkId: null,
+        resultLinkId: null
+      });
+
+    case WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE:
+      // An existing operation already owns this (organizationId,
+      // operationKey) with a different requestFingerprint. Nothing about
+      // this attempt is persisted: no request fact may be overwritten
+      // (the immutability trigger would reject it anyway), no canonical
+      // mutation and no ledger mutation ever ran for this attempt.
+      return Object.freeze({
+        ledgerAction: LEDGER_ACTION.NO_LEDGER_WRITE,
+        status: null,
+        finalOutcome: outcome,
+        lastErrorClass: null,
+        decisionId: null,
+        priorLinkId: null,
+        resultLinkId: null
       });
 
     case WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE:

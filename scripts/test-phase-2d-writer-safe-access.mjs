@@ -52,6 +52,94 @@ console.log('  readOwnDataProperty tolerates a Proxy trap that throws');
   assert.equal(readOwnDataProperty(hostileProxy, 'x'), undefined);
 }
 
+console.log('  Proxy safety: no reflective trap is ever invoked by isPlainMetadataObject or readOwnDataProperty');
+{
+  // Every trap below increments its own counter and, for the traps that
+  // getPrototypeOf/getOwnPropertyDescriptor could plausibly reach, also
+  // throws -- so if any of them fired, the function under test would
+  // either see a nonzero counter or propagate the thrown error, not
+  // silently succeed.
+  function buildInstrumentedProxy(target = {}) {
+    const counts = { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 };
+    const proxy = new Proxy(target, {
+      getPrototypeOf(_t) { counts.getPrototypeOf += 1; throw new Error('getPrototypeOf trap fired'); },
+      getOwnPropertyDescriptor(_t, _key) { counts.getOwnPropertyDescriptor += 1; throw new Error('getOwnPropertyDescriptor trap fired'); },
+      get(_t, _key) { counts.get += 1; throw new Error('get trap fired'); },
+      ownKeys(_t) { counts.ownKeys += 1; throw new Error('ownKeys trap fired'); },
+      has(_t, _key) { counts.has += 1; throw new Error('has trap fired'); }
+    });
+    return { proxy, counts };
+  }
+
+  {
+    const { proxy, counts } = buildInstrumentedProxy();
+    let result;
+    assert.doesNotThrow(() => { result = isPlainMetadataObject(proxy); });
+    assert.equal(result, false, 'isPlainMetadataObject(proxy) must return the safe rejection result');
+    assert.deepEqual(counts, { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 });
+  }
+
+  {
+    const { proxy, counts } = buildInstrumentedProxy();
+    let result;
+    assert.doesNotThrow(() => { result = readOwnDataProperty(proxy, 'field'); });
+    assert.equal(result, undefined, 'readOwnDataProperty(proxy, "field") must return the safe unavailable result');
+    assert.deepEqual(counts, { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 });
+  }
+
+  // A Proxy whose *only* trap is one of the five, to prove each is
+  // individually never reached (not just that a bundle of traps sums to
+  // zero because some cancel out).
+  for (const trapName of ['getPrototypeOf', 'getOwnPropertyDescriptor', 'get', 'ownKeys', 'has']) {
+    let trapCount = 0;
+    const soloTrapProxy = new Proxy({}, {
+      [trapName](..._args) {
+        trapCount += 1;
+        throw new Error(`${trapName} trap fired`);
+      }
+    });
+    assert.doesNotThrow(() => isPlainMetadataObject(soloTrapProxy));
+    assert.doesNotThrow(() => readOwnDataProperty(soloTrapProxy, 'field'));
+    assert.equal(trapCount, 0, `the ${trapName} trap must never be invoked by either function`);
+  }
+}
+
+console.log('  a revoked Proxy is rejected/treated as unavailable safely, with no trap exception escaping');
+{
+  const { proxy: revocable, revoke } = Proxy.revocable({}, {});
+  revoke();
+  assert.doesNotThrow(() => isPlainMetadataObject(revocable));
+  assert.equal(isPlainMetadataObject(revocable), false);
+  assert.doesNotThrow(() => readOwnDataProperty(revocable, 'field'));
+  assert.equal(readOwnDataProperty(revocable, 'field'), undefined);
+}
+
+console.log('  ordinary plain objects and null-prototype objects remain accepted, unaffected by Proxy detection');
+{
+  assert.equal(isPlainMetadataObject({}), true);
+  assert.equal(isPlainMetadataObject({ a: 1, b: 2 }), true);
+  assert.equal(isPlainMetadataObject(Object.create(null)), true);
+  const nullProtoWithData = Object.create(null);
+  nullProtoWithData.field = 'value';
+  assert.equal(isPlainMetadataObject(nullProtoWithData), true);
+  assert.equal(readOwnDataProperty(nullProtoWithData, 'field'), 'value');
+}
+
+console.log('  an ordinary own data property remains readable, and an accessor getter remains uninvoked, on a non-Proxy object');
+{
+  const plain = { field: 'value' };
+  assert.equal(readOwnDataProperty(plain, 'field'), 'value');
+
+  let getterInvoked = false;
+  const withAccessor = {};
+  Object.defineProperty(withAccessor, 'field', {
+    enumerable: true,
+    get() { getterInvoked = true; return 'from getter'; }
+  });
+  assert.equal(readOwnDataProperty(withAccessor, 'field'), undefined);
+  assert.equal(getterInvoked, false, 'an accessor getter must never be invoked');
+}
+
 console.log('  readOwnDataProperty safely handles non-object sources');
 {
   assert.equal(readOwnDataProperty(null, 'x'), undefined);

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { WRITER_OUTCOME, buildWriterResult } from '../server/lib/projectLinkWriterResult.js';
 import {
   mapResultToLedgerState,
@@ -48,17 +50,82 @@ console.log('  SUCCESS_ALREADY_CURRENT: COMPLETED, decision/prior/result IDs may
   assert.equal(ledgerState.resultLinkId, null);
 }
 
-console.log('  AMBIGUOUS_COMMIT: status AMBIGUOUS, no finalOutcome, lastErrorClass = AMBIGUOUS_COMMIT');
+console.log('  AMBIGUOUS_COMMIT: RECOVER_BY_LOOKUP, no ledger status, no terminal mutation, never a database AMBIGUOUS write');
 {
   const result = buildWriterResult(WRITER_OUTCOME.AMBIGUOUS_COMMIT, {
     ...BASE,
     safeDiagnosticCode: 'SQLSTATE_57014'
   });
   const ledgerState = mapResultToLedgerState(result);
-  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.PERSIST_AMBIGUOUS);
-  assert.equal(ledgerState.status, 'AMBIGUOUS');
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.RECOVER_BY_LOOKUP);
+  assert.equal(ledgerState.status, null);
   assert.equal(ledgerState.finalOutcome, null);
-  assert.equal(ledgerState.lastErrorClass, CANONICAL_ERROR_CLASS.AMBIGUOUS_COMMIT);
+  assert.equal(ledgerState.lastErrorClass, null);
+  assert.notEqual(ledgerState.status, 'AMBIGUOUS');
+}
+
+console.log('  no export named PERSIST_AMBIGUOUS remains on LEDGER_ACTION');
+{
+  assert.equal('PERSIST_AMBIGUOUS' in LEDGER_ACTION, false);
+  assert.deepEqual(
+    Object.keys(LEDGER_ACTION).sort(),
+    ['NO_LEDGER_WRITE', 'PERSIST_TERMINAL', 'RECOVER_BY_LOOKUP', 'RETAIN_CLAIMED', 'TRANSACTION_ROLLED_BACK']
+  );
+}
+
+console.log('  CONFLICT_IDEMPOTENCY_KEY_REUSE: NO_LEDGER_WRITE, no ledger status, no terminal mutation, no retry action');
+{
+  const result = buildWriterResult(WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE, {
+    ...BASE,
+    safeDiagnosticCode: 'SQLSTATE_23505'
+  });
+  const ledgerState = mapResultToLedgerState(result);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.NO_LEDGER_WRITE);
+  assert.equal(ledgerState.status, null);
+  assert.equal(ledgerState.finalOutcome, WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE);
+  assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED);
+}
+
+console.log('  every replayed terminal result maps to NO_LEDGER_WRITE, regardless of the original outcome');
+{
+  const replayedCases = [
+    [WRITER_OUTCOME.SUCCESS_CREATED, { decisionId: DECISION_ID, resultLinkId: RESULT_LINK_ID }],
+    [WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT, {}],
+    [WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE, { safeDiagnosticCode: 'MANUAL_PRECEDENCE' }],
+    [WRITER_OUTCOME.INTERNAL_FAILURE, { safeDiagnosticCode: 'SQLSTATE_23503' }]
+  ];
+  for (const [outcome, extra] of replayedCases) {
+    const result = buildWriterResult(outcome, { ...BASE, ...extra, replayed: true });
+    const ledgerState = mapResultToLedgerState(result);
+    assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.NO_LEDGER_WRITE, `replayed ${outcome} must map to NO_LEDGER_WRITE`);
+    assert.equal(ledgerState.status, null);
+    assert.equal(ledgerState.finalOutcome, outcome);
+  }
+}
+
+console.log('  the same non-replayed result still maps to its original PERSIST_TERMINAL action');
+{
+  const result = buildWriterResult(WRITER_OUTCOME.SUCCESS_CREATED, {
+    ...BASE,
+    decisionId: DECISION_ID,
+    resultLinkId: RESULT_LINK_ID
+  });
+  const ledgerState = mapResultToLedgerState(result);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.PERSIST_TERMINAL);
+  assert.equal(ledgerState.status, 'COMPLETED');
+  assert.equal(ledgerState.finalOutcome, WRITER_OUTCOME.SUCCESS_CREATED);
+}
+
+console.log('  replayed handling takes precedence over normal outcome mapping (defensive: checked ahead of the switch)');
+{
+  // Constructed by hand (bypassing buildWriterResult's own outcome-eligibility
+  // guard) specifically to prove mapResultToLedgerState's own precedence,
+  // independent of the upstream contract that would normally prevent this
+  // combination from ever being built.
+  const handRolled = { outcome: WRITER_OUTCOME.CONFLICT_STALE_STATE, replayed: true, ...BASE };
+  const ledgerState = mapResultToLedgerState(handRolled);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.NO_LEDGER_WRITE);
+  assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED);
 }
 
 console.log('  manual-precedence failure: terminal FAILED, lastErrorClass = MANUAL_PRECEDENCE, no decision/result IDs');
@@ -139,6 +206,19 @@ console.log('  the canonical last_error_class vocabulary never includes hand-wri
   const ledgerState = mapResultToLedgerState(withHandWrittenLabel);
   assert.notEqual(ledgerState.lastErrorClass, 'STALE_ACTIVE_LINK');
   assert.equal(ledgerState.lastErrorClass, CANONICAL_ERROR_CLASS.UNKNOWN);
+}
+
+console.log('  the recovery invariant is documented: a no-row lookup right after a lost response does not by itself prove rollback');
+{
+  const moduleSource = readFileSync(
+    fileURLToPath(new URL('../server/lib/projectLinkWriterResultLedgerMapper.js', import.meta.url)),
+    'utf8'
+  );
+  assert.match(moduleSource, /RECOVERY INVARIANT/);
+  assert.match(moduleSource, /may still genuinely be in\s*\* flight/);
+  assert.match(moduleSource, /bounded polling/);
+  assert.match(moduleSource, /idempotently re-invoking/);
+  assert.match(moduleSource, /uniq_project_link_operations_org_key/);
 }
 
 console.log('  rejects a malformed result and an unhandled outcome');

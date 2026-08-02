@@ -1,6 +1,6 @@
+import { types } from "node:util";
 import {
   isPlainMetadataObject,
-  readOwnDataProperty,
   isUuid,
   isValidOperationKey,
   isSafeUpperIdentifier,
@@ -16,6 +16,7 @@ export const WRITER_OUTCOME = Object.freeze({
   SUCCESS_ALREADY_CURRENT: "SUCCESS_ALREADY_CURRENT",
   CONFLICT_CONCURRENT_CHANGE: "CONFLICT_CONCURRENT_CHANGE",
   CONFLICT_STALE_STATE: "CONFLICT_STALE_STATE",
+  CONFLICT_IDEMPOTENCY_KEY_REUSE: "CONFLICT_IDEMPOTENCY_KEY_REUSE",
   BLOCKED_MANUAL_PRECEDENCE: "BLOCKED_MANUAL_PRECEDENCE",
   INVALID_PARENT_OR_TENANT: "INVALID_PARENT_OR_TENANT",
   FORBIDDEN: "FORBIDDEN",
@@ -37,8 +38,11 @@ const ALL_KNOWN_FIELDS = Object.freeze([
   "resultLinkId",
   "rereadPerformed",
   "retryPerformed",
-  "safeDiagnosticCode"
+  "safeDiagnosticCode",
+  "replayed"
 ]);
+
+const ALL_KNOWN_FIELD_NAMES = new Set(ALL_KNOWN_FIELDS);
 
 /**
  * SUCCESS_ALREADY_CURRENT represents a successful no-op: the caller's
@@ -49,23 +53,23 @@ const ALL_KNOWN_FIELDS = Object.freeze([
 const OUTCOME_RULES = Object.freeze({
   [WRITER_OUTCOME.SUCCESS_CREATED]: {
     required: ["decisionId", "resultLinkId"],
-    optional: ["rereadPerformed", "retryPerformed"]
+    optional: ["rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.SUCCESS_REACTIVATED]: {
     required: ["decisionId", "resultLinkId"],
-    optional: ["priorLinkId", "rereadPerformed", "retryPerformed"]
+    optional: ["priorLinkId", "rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.SUCCESS_REPLACED]: {
     required: ["decisionId", "resultLinkId", "priorLinkId"],
-    optional: ["rereadPerformed", "retryPerformed"]
+    optional: ["rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.SUCCESS_TERMINALLY_ENDED]: {
     required: ["decisionId", "priorLinkId"],
-    optional: ["rereadPerformed", "retryPerformed"]
+    optional: ["rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT]: {
     required: [],
-    optional: ["decisionId", "priorLinkId", "resultLinkId", "rereadPerformed", "retryPerformed"]
+    optional: ["decisionId", "priorLinkId", "resultLinkId", "rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE]: {
     required: ["rereadPerformed", "retryPerformed", "safeDiagnosticCode"],
@@ -75,17 +79,21 @@ const OUTCOME_RULES = Object.freeze({
     required: ["rereadPerformed", "retryPerformed", "safeDiagnosticCode"],
     optional: ["observedActiveLinkId"]
   },
+  [WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE]: {
+    required: ["safeDiagnosticCode"],
+    optional: []
+  },
   [WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE]: {
     required: ["safeDiagnosticCode"],
-    optional: ["observedActiveLinkId", "rereadPerformed", "retryPerformed"]
+    optional: ["observedActiveLinkId", "rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT]: {
     required: ["safeDiagnosticCode"],
-    optional: []
+    optional: ["replayed"]
   },
   [WRITER_OUTCOME.FORBIDDEN]: {
     required: ["safeDiagnosticCode"],
-    optional: []
+    optional: ["replayed"]
   },
   [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE]: {
     required: ["safeDiagnosticCode"],
@@ -97,7 +105,7 @@ const OUTCOME_RULES = Object.freeze({
   },
   [WRITER_OUTCOME.INTERNAL_FAILURE]: {
     required: ["safeDiagnosticCode"],
-    optional: []
+    optional: ["replayed"]
   }
 });
 
@@ -118,7 +126,8 @@ const FIELD_VALIDATORS = Object.freeze({
   resultLinkId: (value) => isUuid(value),
   rereadPerformed: (value) => typeof value === "boolean",
   retryPerformed: (value) => typeof value === "boolean",
-  safeDiagnosticCode: (value) => isSafeUpperIdentifier(value)
+  safeDiagnosticCode: (value) => isSafeUpperIdentifier(value),
+  replayed: (value) => typeof value === "boolean"
 });
 
 function fail(message) {
@@ -126,10 +135,120 @@ function fail(message) {
 }
 
 /**
+ * Same Proxy-detection discipline as projectLinkWriterSafeAccess.js: a
+ * Proxy (revoked or not) is detected via Node's built-in, trap-free
+ * util.types.isProxy *before* any reflective operation is attempted on the
+ * value -- never via a try/catch around Object.getOwnPropertyDescriptor
+ * alone, since that call's own trap already executes (with any side
+ * effect) before it could throw. Fails closed (treats the value as a
+ * Proxy) if detection itself throws.
+ */
+function isProxyLike(value) {
+  try {
+    return types.isProxy(value);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Like readOwnDataProperty, but also reports whether the key exists as an
+ * own *data* property at all -- distinguishing "the property is genuinely
+ * absent" from "the property exists with value undefined" (e.g. an object
+ * literal `{ replayed: undefined }`), which readOwnDataProperty's return
+ * value alone cannot distinguish (both read back as `undefined`). An own
+ * accessor/getter property is deliberately treated as absent here too --
+ * exactly like readOwnDataProperty, its getter is never invoked and never
+ * counts as "present" -- so a hostile getter can neither execute nor be
+ * used to smuggle a value past this check. A Proxy `source` is likewise
+ * treated as absent, with no reflective operation ever attempted on it.
+ */
+function readOwnPropertyPresence(source, key) {
+  if (source === null || typeof source !== "object") {
+    return { present: false, value: undefined };
+  }
+  if (isProxyLike(source)) {
+    return { present: false, value: undefined };
+  }
+  let descriptor;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(source, key);
+  } catch {
+    return { present: false, value: undefined };
+  }
+  if (!descriptor || !("value" in descriptor)) {
+    return { present: false, value: undefined };
+  }
+  return { present: true, value: descriptor.value };
+}
+
+/**
+ * Enumerates metadata's own *data* property keys (string and symbol) and
+ * fails if any of them is not in ALL_KNOWN_FIELD_NAMES -- the closed
+ * vocabulary this contract promises. Called only after the caller has
+ * already confirmed `metadata` is not a Proxy (isPlainMetadataObject), but
+ * re-checks Proxy-ness itself immediately beforehand anyway so this
+ * function's own safety does not depend on being called in a particular
+ * order relative to that check -- Object.getOwnPropertyNames/
+ * Object.getOwnPropertySymbols must never be reached for a Proxy.
+ *
+ * An own *accessor* property (a getter, with or without a setter) is
+ * deliberately NOT inspected for vocabulary membership and never has its
+ * getter invoked -- consistent with this module's existing convention of
+ * treating an accessor-only property as unavailable/absent rather than a
+ * value to validate. Object.getOwnPropertyDescriptor never triggers a
+ * getter, so this distinction is made safely, without ever running
+ * caller-supplied code.
+ *
+ * A symbol-keyed own data property is always rejected: ALL_KNOWN_FIELDS
+ * contains only string keys, and this contract does not currently permit
+ * any symbol-keyed field.
+ */
+function assertNoUnknownOwnDataProperties(metadata) {
+  if (isProxyLike(metadata)) {
+    fail("metadata deve essere un oggetto semplice (non array, funzione o istanza di Error).");
+  }
+
+  const ownKeys = [...Object.getOwnPropertyNames(metadata), ...Object.getOwnPropertySymbols(metadata)];
+  for (const key of ownKeys) {
+    let descriptor;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(metadata, key);
+    } catch {
+      continue; // treat as unavailable, exactly like readOwnPropertyPresence does elsewhere
+    }
+    if (!descriptor || !("value" in descriptor)) continue; // accessor-only -- never inspected further, getter never invoked
+
+    if (typeof key === "symbol" || !ALL_KNOWN_FIELD_NAMES.has(key)) {
+      fail(`Campo non riconosciuto: ${String(key)}.`);
+    }
+  }
+}
+
+/**
  * Builds a closed, strictly validated writer result. Only fields listed in
  * ALL_KNOWN_FIELDS ever survive into the returned object, each must pass
- * its type validator, and metadata is read via readOwnDataProperty so a
+ * its type validator, and metadata is read via readOwnPropertyPresence so a
  * hostile getter on the input object can never execute.
+ *
+ * Every own data-property key on `metadata` must belong to ALL_KNOWN_FIELDS
+ * at all -- an entirely unknown key (a typo such as "replayd", or any other
+ * unrecognized field) throws, rather than being silently ignored.
+ *
+ * A known field supplied as an own data property but not permitted by the
+ * selected outcome's OUTCOME_RULES entry is rejected outright -- regardless
+ * of its value (a UUID, null, an own undefined, or anything else) -- never
+ * silently dropped the way an unknown/unlisted field previously was.
+ * Silently dropping a *known* field would risk a caller believing a
+ * prohibited fact (e.g. a decisionId on an outcome that must never carry
+ * one) was accepted when it was not. This check is presence-based
+ * (own-property existence), not value-based, precisely so a prohibited
+ * field cannot be smuggled through as null/undefined to dodge it -- the
+ * same reasoning "replayed" already required is now applied uniformly to
+ * every known field, which also makes "replayed"'s own outcome-eligibility
+ * a simple consequence of this general rule (an outcome allows replayed if
+ * and only if OUTCOME_RULES lists it), rather than a separately maintained
+ * list.
  */
 export function buildWriterResult(outcome, metadata = {}) {
   const rules = OUTCOME_RULES[outcome];
@@ -139,15 +258,41 @@ export function buildWriterResult(outcome, metadata = {}) {
   if (!isPlainMetadataObject(metadata)) {
     fail("metadata deve essere un oggetto semplice (non array, funzione o istanza di Error).");
   }
+  assertNoUnknownOwnDataProperties(metadata);
 
   const requiredFields = new Set([...BASE_REQUIRED_FIELDS, ...rules.required]);
   const allowedFields = new Set([...BASE_REQUIRED_FIELDS, ...rules.required, ...rules.optional]);
 
   const result = { outcome };
+
   for (const field of ALL_KNOWN_FIELDS) {
+    const presence = readOwnPropertyPresence(metadata, field);
+
+    if (presence.present && !allowedFields.has(field)) {
+      fail(`Il campo ${field} non è ammesso per l'esito ${outcome}.`);
+    }
     if (!allowedFields.has(field)) continue;
 
-    const value = readOwnDataProperty(metadata, field);
+    if (field === "replayed") {
+      // Stricter than every other allowed field: "replayed" has exactly
+      // three legal states -- absent, true, false. Presence with any
+      // non-boolean value (including null or an own undefined) is a
+      // validation error here, never renormalized to "absent" the way a
+      // null/undefined value for another allowed field is below.
+      if (presence.present) {
+        if (typeof presence.value !== "boolean") {
+          fail(`Valore non valido per il campo replayed in ${outcome}.`);
+        }
+        result.replayed = presence.value;
+      }
+      continue;
+    }
+
+    // Every other allowed field: an own null/undefined value continues to
+    // be treated as "not supplied" for required-field purposes -- this
+    // pre-existing convention is unchanged; only the *prohibited-field*
+    // check above is new behavior.
+    const value = presence.present ? presence.value : undefined;
     const isPresent = value !== undefined && value !== null;
 
     if (!isPresent) {
@@ -173,7 +318,8 @@ export function isSuccessOutcome(outcome) {
 
 export function isConflictOutcome(outcome) {
   return outcome === WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE
-    || outcome === WRITER_OUTCOME.CONFLICT_STALE_STATE;
+    || outcome === WRITER_OUTCOME.CONFLICT_STALE_STATE
+    || outcome === WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE;
 }
 
 export function requiresManualReview(outcome) {
