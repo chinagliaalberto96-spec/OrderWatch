@@ -1,5 +1,6 @@
 import { WRITER_OUTCOME } from "./projectLinkWriterResult.js";
 import { toSafeDiagnosticCode, extractSafeDiagnostics } from "./projectLinkWriterDiagnostics.js";
+import { readOwnDataProperty, isPlainMetadataObject } from "./projectLinkWriterSafeAccess.js";
 
 export const LOG_SEVERITY = Object.freeze({
   INFO: "info",
@@ -170,13 +171,49 @@ function policyResult({
  * have sanitized it first -- while still producing the exact same
  * classification as before for an already-sanitized diagnostics object,
  * since extractSafeDiagnostics is idempotent on its own output.
+ *
+ * The entire trust boundary begins at `options` itself, not merely at
+ * `diagnostics`: `options` is first validated with isPlainMetadataObject
+ * (ordinary Object.prototype object, or a null-prototype object -- never an
+ * array, a class instance, a Date/Map/Set/RegExp/Error/typed-array/Promise,
+ * a function, or a Proxy). Only once that gate passes are any of the four
+ * top-level fields (`diagnostics`, `operationPhase`, `ambiguousCommit`,
+ * `commitInFlight`) read, and even then exclusively via readOwnDataProperty
+ * -- never via destructuring, spread, or direct property access. An invalid
+ * container is replaced with a safe empty object before any field is read,
+ * so an array or other non-plain object carrying valid-looking own data
+ * properties (e.g. `const options = []; options.operationPhase = "CLAIM";`)
+ * can never influence classification: isPlainMetadataObject rejects it
+ * before readOwnDataProperty is ever called, exactly as it would reject a
+ * missing options argument entirely.
+ *
+ * readOwnDataProperty itself checks for a Proxy (via util.types.isProxy,
+ * never a reflective operation) before attempting
+ * Object.getOwnPropertyDescriptor, and returns undefined for a non-object,
+ * null, or Proxy source -- so a hostile `options` value (a throwing Proxy, a
+ * revoked Proxy, an object with hostile accessors) can never execute a
+ * getter or Proxy trap merely by being passed to this function, regardless
+ * of which of the four fields is read first. This closes the same class of
+ * gap already closed for `diagnostics` itself and for `operationPhase`'s
+ * CLAIM-only proof (see below): an inherited or accessor-backed value on
+ * `options` can never satisfy any of this function's own-data-property
+ * requirements, and is always treated as absent, falling back to the same
+ * conservative default as a value that was never supplied at all.
+ *
+ * `operationPhase` in particular: the phase-aware 23503 disambiguation below
+ * (CLAIM vs. everything else) is a fail-closed security boundary --
+ * INVALID_PARENT_OR_TENANT is only ever returned when operationPhase is
+ * proven, by an own data property on the options object, to be CLAIM. An
+ * inherited operationPhase (e.g. via Object.create(proto)) can never satisfy
+ * that proof, and never executes an accessor getter or Proxy trap in the
+ * attempt.
  */
-export function classifySqlError({
-  diagnostics,
-  ambiguousCommit = false,
-  commitInFlight = null,
-  operationPhase = null
-} = {}) {
+export function classifySqlError(options = {}) {
+  const safeOptions = isPlainMetadataObject(options) ? options : {};
+  const diagnostics = readOwnDataProperty(safeOptions, "diagnostics");
+  const ambiguousCommit = readOwnDataProperty(safeOptions, "ambiguousCommit") ?? false;
+  const commitInFlight = readOwnDataProperty(safeOptions, "commitInFlight") ?? null;
+  const operationPhase = readOwnDataProperty(safeOptions, "operationPhase") ?? null;
   const safeDiagnostics = extractSafeDiagnostics(diagnostics);
   const sqlstate = safeDiagnostics.sqlstate;
   const safeDiagnosticCode = toSafeDiagnosticCode(safeDiagnostics);
@@ -285,8 +322,29 @@ export function classifySqlError({
       });
 
     case "23503":
+      // Phase-aware, mirroring the 23505 disambiguation above. Only a 23503
+      // proven to have occurred during the ledger CLAIM itself (raised by
+      // project_link_operations's own BEFORE INSERT reference-validation
+      // trigger, before any operation row exists) is a genuine
+      // parent/tenant rejection of the incoming request. A 23503 during
+      // CANONICAL_MUTATION or TERMINAL_UPDATE -- phases where a claimed row
+      // already exists and every reference should already have been proven
+      // tenant-safe by the CLAIM-phase check -- is unexpected and must
+      // never be mislabeled as INVALID_PARENT_OR_TENANT (doing so would
+      // imply a request-level rejection when a claimed operation row, which
+      // the future writer may commit as a terminal FAILED row, in fact
+      // already exists). Missing, malformed or unrecognized operationPhase
+      // fails closed to INTERNAL_FAILURE for the same reason -- an unproven
+      // phase must never be assumed to be CLAIM.
+      if (operationPhase === OPERATION_PHASE.CLAIM) {
+        return policyResult({
+          classification: WRITER_OUTCOME.INVALID_PARENT_OR_TENANT,
+          logSeverity: LOG_SEVERITY.ERROR,
+          safeDiagnosticCode
+        });
+      }
       return policyResult({
-        classification: WRITER_OUTCOME.INVALID_PARENT_OR_TENANT,
+        classification: WRITER_OUTCOME.INTERNAL_FAILURE,
         logSeverity: LOG_SEVERITY.ERROR,
         safeDiagnosticCode
       });

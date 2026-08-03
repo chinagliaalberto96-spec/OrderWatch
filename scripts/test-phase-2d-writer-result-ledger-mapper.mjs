@@ -144,7 +144,7 @@ console.log('  manual-precedence failure: terminal FAILED, lastErrorClass = MANU
   assert.equal(ledgerState.resultLinkId, null);
 }
 
-console.log('  SQLSTATE_55000 (stale state) is NOT terminally persisted -- the claim stays CLAIMED for a retry');
+console.log('  CONFLICT_STALE_STATE (canonical 23505/55000): the atomic writer rolls the claim back together with the canonical mutation attempt -- TRANSACTION_ROLLED_BACK, never a durably-retained CLAIMED row');
 {
   const result = buildWriterResult(WRITER_OUTCOME.CONFLICT_STALE_STATE, {
     ...BASE,
@@ -153,12 +153,13 @@ console.log('  SQLSTATE_55000 (stale state) is NOT terminally persisted -- the c
     safeDiagnosticCode: 'SQLSTATE_55000'
   });
   const ledgerState = mapResultToLedgerState(result);
-  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.TRANSACTION_ROLLED_BACK);
+  assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED);
   assert.equal(ledgerState.status, null);
   assert.equal(ledgerState.finalOutcome, null);
 }
 
-console.log('  CONFLICT_CONCURRENT_CHANGE is also left CLAIMED for a retry, never immediately FAILED');
+console.log('  CONFLICT_CONCURRENT_CHANGE: same TRANSACTION_ROLLED_BACK treatment -- the ledger-key claim and any attempted canonical mutation are rolled back together, no durable CLAIMED row survives');
 {
   const result = buildWriterResult(WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE, {
     ...BASE,
@@ -167,7 +168,10 @@ console.log('  CONFLICT_CONCURRENT_CHANGE is also left CLAIMED for a retry, neve
     safeDiagnosticCode: 'SQLSTATE_23505'
   });
   const ledgerState = mapResultToLedgerState(result);
-  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.TRANSACTION_ROLLED_BACK);
+  assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED);
+  assert.equal(ledgerState.status, null);
+  assert.equal(ledgerState.finalOutcome, null);
 }
 
 console.log('  retryable transaction outcome: nothing to persist, the whole transaction including the claim rolled back');
@@ -181,19 +185,94 @@ console.log('  retryable transaction outcome: nothing to persist, the whole tran
   assert.equal(ledgerState.status, null);
 }
 
-console.log('  definitive non-manual-precedence failures map to FAILED with UNKNOWN fallback when no safe code is available');
+console.log('  INTERNAL_FAILURE (the one non-manual-precedence failure that always occurs post-claim) maps to FAILED with UNKNOWN fallback when no safe code is available');
 {
-  for (const outcome of [
-    WRITER_OUTCOME.INVALID_PARENT_OR_TENANT,
-    WRITER_OUTCOME.FORBIDDEN,
-    WRITER_OUTCOME.INTERNAL_FAILURE
-  ]) {
-    const result = buildWriterResult(outcome, { ...BASE, safeDiagnosticCode: 'SQLSTATE_23503' });
+  const result = buildWriterResult(WRITER_OUTCOME.INTERNAL_FAILURE, { ...BASE, safeDiagnosticCode: 'SQLSTATE_23503' });
+  const ledgerState = mapResultToLedgerState(result);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.PERSIST_TERMINAL);
+  assert.equal(ledgerState.status, 'FAILED');
+  assert.equal(ledgerState.finalOutcome, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.equal(ledgerState.lastErrorClass, 'SQLSTATE_23503');
+}
+
+console.log('  INVALID_PARENT_OR_TENANT maps to NO_LEDGER_WRITE -- the claim insert itself can be rejected (SQLSTATE 23503) before any operation row exists');
+{
+  const result = buildWriterResult(WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, { ...BASE, safeDiagnosticCode: 'SQLSTATE_23503' });
+  const ledgerState = mapResultToLedgerState(result);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.NO_LEDGER_WRITE);
+  assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.PERSIST_TERMINAL);
+  assert.equal(ledgerState.status, null);
+  assert.equal(ledgerState.finalOutcome, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+  assert.equal(ledgerState.decisionId, null);
+  assert.equal(ledgerState.priorLinkId, null);
+  assert.equal(ledgerState.resultLinkId, null);
+}
+
+console.log('  FORBIDDEN maps to NO_LEDGER_WRITE -- SQLSTATE 42501 can occur before the claim insert succeeds, with no privilege basis to terminalize a row that was never created');
+{
+  const result = buildWriterResult(WRITER_OUTCOME.FORBIDDEN, { ...BASE, safeDiagnosticCode: 'SQLSTATE_42501' });
+  const ledgerState = mapResultToLedgerState(result);
+  assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.NO_LEDGER_WRITE);
+  assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.PERSIST_TERMINAL);
+  assert.equal(ledgerState.status, null);
+  assert.equal(ledgerState.finalOutcome, WRITER_OUTCOME.FORBIDDEN);
+  assert.equal(ledgerState.decisionId, null);
+  assert.equal(ledgerState.priorLinkId, null);
+  assert.equal(ledgerState.resultLinkId, null);
+}
+
+console.log('  no final WRITER_OUTCOME maps to RETAIN_CLAIMED after this correction');
+{
+  const minimumMetadataByOutcome = {
+    [WRITER_OUTCOME.SUCCESS_CREATED]: { decisionId: DECISION_ID, resultLinkId: RESULT_LINK_ID },
+    [WRITER_OUTCOME.SUCCESS_REACTIVATED]: { decisionId: DECISION_ID, resultLinkId: RESULT_LINK_ID },
+    [WRITER_OUTCOME.SUCCESS_REPLACED]: { decisionId: DECISION_ID, resultLinkId: RESULT_LINK_ID, priorLinkId: PRIOR_LINK_ID },
+    [WRITER_OUTCOME.SUCCESS_TERMINALLY_ENDED]: { decisionId: DECISION_ID, priorLinkId: PRIOR_LINK_ID },
+    [WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT]: {},
+    [WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE]: { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_23505' },
+    [WRITER_OUTCOME.CONFLICT_STALE_STATE]: { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_55000' },
+    [WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE]: { safeDiagnosticCode: 'SQLSTATE_23505' },
+    [WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE]: { safeDiagnosticCode: 'MANUAL_PRECEDENCE' },
+    [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT]: { safeDiagnosticCode: 'SQLSTATE_23503' },
+    [WRITER_OUTCOME.FORBIDDEN]: { safeDiagnosticCode: 'SQLSTATE_42501' },
+    [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE]: { safeDiagnosticCode: 'SQLSTATE_40001' },
+    [WRITER_OUTCOME.AMBIGUOUS_COMMIT]: { safeDiagnosticCode: 'SQLSTATE_57014' },
+    [WRITER_OUTCOME.INTERNAL_FAILURE]: { safeDiagnosticCode: 'UNKNOWN' }
+  };
+  let checked = 0;
+  for (const outcome of Object.values(WRITER_OUTCOME)) {
+    const extra = minimumMetadataByOutcome[outcome];
+    assert.ok(extra !== undefined, `every WRITER_OUTCOME must be covered by this test's minimum-metadata table: ${outcome}`);
+    const result = buildWriterResult(outcome, { ...BASE, ...extra });
     const ledgerState = mapResultToLedgerState(result);
-    assert.equal(ledgerState.ledgerAction, LEDGER_ACTION.PERSIST_TERMINAL);
-    assert.equal(ledgerState.status, 'FAILED');
-    assert.equal(ledgerState.finalOutcome, outcome);
-    assert.equal(ledgerState.lastErrorClass, 'SQLSTATE_23503');
+    assert.notEqual(ledgerState.ledgerAction, LEDGER_ACTION.RETAIN_CLAIMED, `${outcome} must not map to RETAIN_CLAIMED`);
+    checked += 1;
+  }
+  assert.equal(checked, Object.values(WRITER_OUTCOME).length, 'every declared WRITER_OUTCOME must have been exercised');
+}
+
+console.log('  NO_LEDGER_WRITE and TRANSACTION_ROLLED_BACK results never carry a non-null status or any field that could be mistaken for ledger-write authorization');
+{
+  const noWriteAndRolledBackCases = [
+    [WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE, { safeDiagnosticCode: 'SQLSTATE_23505' }],
+    [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, { safeDiagnosticCode: 'SQLSTATE_23503' }],
+    [WRITER_OUTCOME.FORBIDDEN, { safeDiagnosticCode: 'SQLSTATE_42501' }],
+    [WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE, { rereadPerformed: true, retryPerformed: true, safeDiagnosticCode: 'SQLSTATE_23505' }],
+    [WRITER_OUTCOME.CONFLICT_STALE_STATE, { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_55000' }],
+    [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE, { safeDiagnosticCode: 'SQLSTATE_40001' }]
+  ];
+  for (const [outcome, extra] of noWriteAndRolledBackCases) {
+    const result = buildWriterResult(outcome, { ...BASE, ...extra });
+    const ledgerState = mapResultToLedgerState(result);
+    assert.ok(
+      ledgerState.ledgerAction === LEDGER_ACTION.NO_LEDGER_WRITE || ledgerState.ledgerAction === LEDGER_ACTION.TRANSACTION_ROLLED_BACK,
+      `${outcome} must map to NO_LEDGER_WRITE or TRANSACTION_ROLLED_BACK`
+    );
+    assert.equal(ledgerState.status, null, `${outcome}: status must be null, never authorizing a write`);
+    assert.equal(ledgerState.decisionId, null, `${outcome}: decisionId must be null`);
+    assert.equal(ledgerState.priorLinkId, null, `${outcome}: priorLinkId must be null`);
+    assert.equal(ledgerState.resultLinkId, null, `${outcome}: resultLinkId must be null`);
+    assert.equal(ledgerState.lastErrorClass, null, `${outcome}: lastErrorClass must be null`);
   }
 }
 

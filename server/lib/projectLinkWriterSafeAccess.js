@@ -34,13 +34,20 @@ function isProxyLike(value) {
  * top-level container for metadata-shaped input. The Proxy check runs
  * first and unconditionally, before Object.getPrototypeOf is ever called --
  * Array.isArray and Object.getPrototypeOf are never reached for a Proxy, so
- * no getPrototypeOf/ownKeys/has trap can ever fire from this function.
+ * no getPrototypeOf/ownKeys/has trap can ever fire from this function. If
+ * prototype inspection itself fails for any other reason, the value is
+ * rejected conservatively rather than allowing the exception to escape.
  */
 export function isPlainMetadataObject(value) {
   if (value === null || typeof value !== "object") return false;
   if (isProxyLike(value)) return false;
   if (Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
+  let proto;
+  try {
+    proto = Object.getPrototypeOf(value);
+  } catch {
+    return false;
+  }
   return proto === Object.prototype || proto === null;
 }
 

@@ -13,18 +13,43 @@ import { WRITER_OUTCOME } from "./projectLinkWriterResult.js";
  * correctly instruct for an ambiguous-commit attempt; see RECOVER_BY_LOOKUP.
  *
  * PERSIST_TERMINAL         -- write a terminal COMPLETED or FAILED row.
- * RETAIN_CLAIMED           -- leave the existing CLAIMED row untouched; the
- *                              conflict was on the canonical link tables, not
- *                              on the ledger's own operation identity, so the
- *                              same logical operation should reread state and
- *                              retry its canonical mutation under the same
- *                              claim, not be marked FAILED.
+ * RETAIN_CLAIMED           -- reserved, unused by this mapper. No final
+ *                              WRITER_OUTCOME maps to it (see below) -- it
+ *                              must NEVER be interpreted as permission to
+ *                              commit a durable CLAIMED row. The atomic
+ *                              writer's claim and every canonical mutation
+ *                              attempted under it share one transaction;
+ *                              when a canonical-table conflict is detected,
+ *                              the writer rolls the claim back together with
+ *                              the attempted canonical mutation and returns
+ *                              a structured conflict result from an
+ *                              exception handler within that same
+ *                              transaction -- it never leaves the claim
+ *                              committed for a later, separate invocation to
+ *                              resume. This value is kept in the enum only
+ *                              because it is part of this module's already
+ *                              exported, committed public surface (removing
+ *                              it would be a breaking export change outside
+ *                              this correction's narrow scope); it is not
+ *                              removed, but mapResultToLedgerState never
+ *                              returns it.
  * TRANSACTION_ROLLED_BACK  -- the whole transaction, including the CLAIMED
- *                              insert itself, was rolled back by Postgres;
- *                              there is no ledger row left to update, and a
- *                              retry means starting a fresh transaction
- *                              (which may reuse the same operation_key/
- *                              request_fingerprint, since nothing persisted).
+ *                              insert itself (and, where one was attempted,
+ *                              the canonical mutation), was rolled back by
+ *                              Postgres; there is no ledger row left to
+ *                              update, and a retry means starting a fresh
+ *                              transaction (which may reuse the same
+ *                              operation_key/request_fingerprint, since
+ *                              nothing persisted). This is also the correct
+ *                              action for a canonical-table conflict
+ *                              (CONFLICT_CONCURRENT_CHANGE,
+ *                              CONFLICT_STALE_STATE): the atomic writer
+ *                              rolls the claim back together with the
+ *                              canonical mutation it attempted, exactly as
+ *                              for any other whole-transaction rollback --
+ *                              there is no different-in-kind "retain the
+ *                              claim" action for this case (see
+ *                              RETAIN_CLAIMED above).
  * RECOVER_BY_LOOKUP        -- this specific attempt's outcome is unknown
  *                              (its own COMMIT acknowledgement was lost).
  *                              Perform NO ledger write from this connection.
@@ -36,11 +61,29 @@ import { WRITER_OUTCOME } from "./projectLinkWriterResult.js";
  *                              commit) or absent (it did not). Never write a
  *                              database AMBIGUOUS status from this action.
  * NO_LEDGER_WRITE          -- no ledger mutation of any kind applies to this
- *                              attempt: either it is a replay of an
- *                              already-terminal result (nothing new
- *                              happened), or it was rejected before any
- *                              claim/mutation was attempted (idempotency-key
- *                              reuse with a different fingerprint).
+ *                              attempt, because there is either nothing new
+ *                              to persist or no row that could physically
+ *                              have been claimed in the first place:
+ *                                - a replay of an already-terminal result
+ *                                  (nothing new happened);
+ *                                - idempotency-key reuse with a different
+ *                                  fingerprint (rejected before any
+ *                                  claim/mutation was attempted);
+ *                                - INVALID_PARENT_OR_TENANT (SQLSTATE 23503
+ *                                  from the operation-ledger's own
+ *                                  reference-validation trigger can reject
+ *                                  the CLAIMED insert itself, before any
+ *                                  operation row exists to update);
+ *                                - FORBIDDEN (SQLSTATE 42501 can likewise
+ *                                  occur before the claim insert succeeds,
+ *                                  if the caller lacks INSERT privilege on
+ *                                  project_link_operations -- there is no
+ *                                  row, and no privilege basis, to
+ *                                  reliably terminalize one).
+ *                              A NO_LEDGER_WRITE result must never be used
+ *                              to authorize a ledger UPDATE: it carries a
+ *                              null status and no field a caller could
+ *                              mistake for permission to write one.
  *
  * RECOVERY INVARIANT (not implemented by this module -- documented here
  * because RECOVER_BY_LOOKUP is the action that makes it load-bearing):
@@ -202,9 +245,15 @@ export function mapResultToLedgerState(result) {
         resultLinkId: null
       });
 
-    case WRITER_OUTCOME.INVALID_PARENT_OR_TENANT:
-    case WRITER_OUTCOME.FORBIDDEN:
     case WRITER_OUTCOME.INTERNAL_FAILURE:
+      // Unlike INVALID_PARENT_OR_TENANT/FORBIDDEN below, every classifier
+      // branch that produces INTERNAL_FAILURE (an unrecognized/missing
+      // 23505 constraint, a 23514 without the manual-precedence message, an
+      // unmapped SQLSTATE) can only arise from a canonical-mutation-phase or
+      // deferred-constraint-forcing-phase statement -- never from the claim
+      // insert itself -- so a claimed row always already exists by the time
+      // this outcome is determined. PERSIST_TERMINAL remains correct and
+      // physically achievable here.
       return Object.freeze({
         ledgerAction: LEDGER_ACTION.PERSIST_TERMINAL,
         status: LEDGER_STATUS.FAILED,
@@ -215,13 +264,52 @@ export function mapResultToLedgerState(result) {
         resultLinkId: null
       });
 
+    case WRITER_OUTCOME.INVALID_PARENT_OR_TENANT:
+      // SQLSTATE 23503 from the operation-ledger's own reference-validation
+      // trigger (assert_project_link_operation_references) can reject the
+      // CLAIMED insert itself, before any operation row exists -- there is
+      // nothing to persist a terminal FAILED status against. See this
+      // module's NO_LEDGER_WRITE doc comment above for the full rationale.
+      return Object.freeze({
+        ledgerAction: LEDGER_ACTION.NO_LEDGER_WRITE,
+        status: null,
+        finalOutcome: outcome,
+        lastErrorClass: null,
+        decisionId: null,
+        priorLinkId: null,
+        resultLinkId: null
+      });
+
+    case WRITER_OUTCOME.FORBIDDEN:
+      // SQLSTATE 42501 can likewise occur before the claim insert itself
+      // succeeds, if the caller lacks INSERT privilege on
+      // project_link_operations -- there is no row, and no privilege basis,
+      // to reliably terminalize one. Kept classified as FORBIDDEN for
+      // transport/application diagnostics only; never represented as a
+      // normal terminal business result the writer persisted.
+      return Object.freeze({
+        ledgerAction: LEDGER_ACTION.NO_LEDGER_WRITE,
+        status: null,
+        finalOutcome: outcome,
+        lastErrorClass: null,
+        decisionId: null,
+        priorLinkId: null,
+        resultLinkId: null
+      });
+
     case WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE:
     case WRITER_OUTCOME.CONFLICT_STALE_STATE:
-      // Conflict on the canonical link tables, not on the ledger row's own
-      // identity -- the same claimed operation should retry, not be marked
-      // FAILED.
+      // Conflict on the canonical link tables. The atomic writer's claim
+      // and its canonical-mutation attempt share one transaction; on this
+      // conflict, both are rolled back together and a structured result is
+      // returned from within that same transaction -- there is no ledger
+      // row left afterward, exactly as for any other whole-transaction
+      // rollback (see TRANSACTION_ROLLED_BACK above). A later, separate
+      // attempt to retry this logical operation starts a fresh transaction
+      // (it may reuse the same operation_key/request_fingerprint, since
+      // nothing persisted) -- it never "resumes" a durably-claimed row.
       return Object.freeze({
-        ledgerAction: LEDGER_ACTION.RETAIN_CLAIMED,
+        ledgerAction: LEDGER_ACTION.TRANSACTION_ROLLED_BACK,
         status: null,
         finalOutcome: null,
         lastErrorClass: null,

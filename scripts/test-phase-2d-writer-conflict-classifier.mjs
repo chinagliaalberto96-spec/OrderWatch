@@ -174,11 +174,88 @@ console.log('  23514 unrelated (e.g. state-check violation): internal failure, n
   assert.equal(policy.manualReviewRequired, false);
 }
 
-console.log('  23503: invalid parent/tenant reference');
+console.log('  23503 + CLAIM: invalid parent/tenant reference -- the claim insert itself was rejected before any operation row exists');
 {
-  const policy = classifyRaw({ code: '23503', constraint: 'fk_order_project_links_project_tenant' });
+  const policy = classifyRaw(
+    { code: '23503', constraint: 'fk_order_project_links_project_tenant' },
+    { operationPhase: OPERATION_PHASE.CLAIM }
+  );
   assert.equal(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
   assert.equal(policy.blindRetryAllowed, false);
+}
+
+console.log('  23503 + CANONICAL_MUTATION: internal failure, never mislabeled as a parent/tenant rejection (a claimed row already exists at this phase)');
+{
+  const policy = classifyRaw(
+    { code: '23503', constraint: 'fk_order_project_links_project_tenant' },
+    { operationPhase: OPERATION_PHASE.CANONICAL_MUTATION }
+  );
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+  assert.equal(policy.blindRetryAllowed, false);
+}
+
+console.log('  23503 + TERMINAL_UPDATE: internal failure, never mislabeled as a parent/tenant rejection');
+{
+  const policy = classifyRaw(
+    { code: '23503', constraint: 'fk_order_project_links_project_tenant' },
+    { operationPhase: OPERATION_PHASE.TERMINAL_UPDATE }
+  );
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+}
+
+console.log('  23503 + missing operationPhase: fails closed to internal failure, never assumed to be CLAIM');
+{
+  const policy = classifyRaw({ code: '23503', constraint: 'fk_order_project_links_project_tenant' });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+}
+
+console.log('  23503 + malformed/unrecognized operationPhase: fails closed to internal failure');
+{
+  const policy = classifyRaw(
+    { code: '23503', constraint: 'fk_order_project_links_project_tenant' },
+    { operationPhase: 'NOT_A_REAL_PHASE' }
+  );
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+}
+
+console.log('  23503 + an inherited operationPhase value cannot affect classification');
+{
+  const proto = { operationPhase: OPERATION_PHASE.CLAIM };
+  const optionsWithInheritedPhase = Object.create(proto);
+  optionsWithInheritedPhase.diagnostics = { code: '23503', constraint: 'fk_order_project_links_project_tenant' };
+  const policy = classifySqlError(optionsWithInheritedPhase);
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+}
+
+console.log('  23503 + accessor-backed diagnostics: getter never invoked, fails closed to internal failure');
+{
+  let sqlstateGetterCount = 0;
+  const hostile = {};
+  Object.defineProperty(hostile, 'sqlstate', { enumerable: true, get() { sqlstateGetterCount += 1; return '23503'; } });
+  const policy = classifySqlError({ diagnostics: hostile, operationPhase: OPERATION_PHASE.CLAIM });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.equal(sqlstateGetterCount, 0, 'the sqlstate getter must never be invoked');
+}
+
+console.log('  23503 + Proxy diagnostics: no trap invoked, fails closed to internal failure');
+{
+  const counts = { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 };
+  const proxy = new Proxy({ sqlstate: '23503', constraint: 'fk_order_project_links_project_tenant' }, {
+    getPrototypeOf(_t) { counts.getPrototypeOf += 1; throw new Error('trap fired'); },
+    getOwnPropertyDescriptor(_t, _k) { counts.getOwnPropertyDescriptor += 1; throw new Error('trap fired'); },
+    get(_t, _k) { counts.get += 1; throw new Error('trap fired'); },
+    ownKeys(_t) { counts.ownKeys += 1; throw new Error('trap fired'); },
+    has(_t, _k) { counts.has += 1; throw new Error('trap fired'); }
+  });
+  let policy;
+  assert.doesNotThrow(() => { policy = classifySqlError({ diagnostics: proxy, operationPhase: OPERATION_PHASE.CLAIM }); });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.deepEqual(counts, { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 });
 }
 
 console.log('  42501: forbidden');
@@ -571,5 +648,432 @@ console.log('  existing 23505 constraint-aware, 55000, transaction, ambiguous-co
 }
 
 console.log('PASS: manualPrecedenceMarker byte-for-byte exact equality holds in the classifier');
+
+console.log('Gate 2D.1B.2A correction: the complete top-level options trust boundary -- diagnostics, operationPhase, ambiguousCommit and commitInFlight are all read via readOwnDataProperty, never by destructuring or direct property access on options itself');
+
+function buildInstrumentedOptionsProxy(target) {
+  const counts = { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 };
+  const proxy = new Proxy(target, {
+    getPrototypeOf(_t) { counts.getPrototypeOf += 1; throw new Error('getPrototypeOf trap fired'); },
+    getOwnPropertyDescriptor(_t, _k) { counts.getOwnPropertyDescriptor += 1; throw new Error('getOwnPropertyDescriptor trap fired'); },
+    get(_t, _k) { counts.get += 1; throw new Error('get trap fired'); },
+    ownKeys(_t) { counts.ownKeys += 1; throw new Error('ownKeys trap fired'); },
+    has(_t, _k) { counts.has += 1; throw new Error('has trap fired'); }
+  });
+  return { proxy, counts };
+}
+const ZERO_TRAP_COUNTS = { getPrototypeOf: 0, getOwnPropertyDescriptor: 0, get: 0, ownKeys: 0, has: 0 };
+
+console.log('  1. a combined hostile Proxy passed as the entire options argument: every trap count remains zero, no exception escapes, conservative classification returned');
+{
+  const { proxy, counts } = buildInstrumentedOptionsProxy({
+    diagnostics: { code: '23514', message: ORDER_MANUAL_PRECEDENCE_MESSAGE },
+    operationPhase: OPERATION_PHASE.CLAIM,
+    ambiguousCommit: true,
+    commitInFlight: true
+  });
+  let policy;
+  assert.doesNotThrow(() => { policy = classifySqlError(proxy); });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE);
+  assert.deepEqual(counts, ZERO_TRAP_COUNTS);
+}
+
+console.log('  2. a Proxy whose only trap is one of the five, one at a time: each is individually proven never invoked when passed as the whole options argument -- Proxy-ness itself (via the trap-free util.types.isProxy check) makes every field unavailable, regardless of which single trap is instrumented, so the conservative default is returned, not a "correctly read through" classification');
+{
+  for (const trapName of ['getPrototypeOf', 'getOwnPropertyDescriptor', 'get', 'ownKeys', 'has']) {
+    let trapCount = 0;
+    const soloTrapProxy = new Proxy(
+      { diagnostics: { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }, operationPhase: OPERATION_PHASE.CLAIM },
+      { [trapName](..._args) { trapCount += 1; throw new Error(`${trapName} trap fired`); } }
+    );
+    let policy;
+    assert.doesNotThrow(() => { policy = classifySqlError(soloTrapProxy); });
+    assert.equal(trapCount, 0, `the ${trapName} trap must never be invoked merely by passing a Proxy as options`);
+    assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE, `a Proxy options container must always fall back to the conservative default, even with only a ${trapName} trap defined`);
+  }
+}
+
+console.log('  3. a revoked Proxy passed as the whole options argument: no exception escapes, conservative classification returned');
+{
+  const { proxy: revocable, revoke } = Proxy.revocable(
+    { diagnostics: { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }, operationPhase: OPERATION_PHASE.CLAIM },
+    {}
+  );
+  revoke();
+  let policy;
+  assert.doesNotThrow(() => { policy = classifySqlError(revocable); });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+}
+
+console.log('  4. a Proxy whose get trap would return forged diagnostics/operationPhase=CLAIM/ambiguousCommit=true/commitInFlight=true: none of those forged values may affect classification');
+{
+  const target = {};
+  const proxy = new Proxy(target, {
+    get(_t, key) {
+      if (key === 'diagnostics') return { code: '23503' };
+      if (key === 'operationPhase') return OPERATION_PHASE.CLAIM;
+      if (key === 'ambiguousCommit') return true;
+      if (key === 'commitInFlight') return true;
+      return undefined;
+    }
+  });
+  let policy;
+  assert.doesNotThrow(() => { policy = classifySqlError(proxy); });
+  // Genuinely unavailable diagnostics (Proxy get trap never invoked) -> sqlstate null -> default branch.
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT);
+}
+
+console.log('  5. an own accessor-only property for each of the four fields individually: getter counter remains zero, field treated as unavailable, conservative/default classification');
+{
+  let getterCount = 0;
+  {
+    getterCount = 0;
+    const hostile = { operationPhase: OPERATION_PHASE.CLAIM };
+    Object.defineProperty(hostile, 'diagnostics', { enumerable: true, get() { getterCount += 1; return { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }; } });
+    const policy = classifySqlError(hostile);
+    assert.equal(getterCount, 0, 'the diagnostics getter must never be invoked');
+    assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE, 'unavailable diagnostics must fall back to the conservative default');
+  }
+  {
+    getterCount = 0;
+    const hostile = { diagnostics: { code: '23503' } };
+    Object.defineProperty(hostile, 'operationPhase', { enumerable: true, get() { getterCount += 1; return OPERATION_PHASE.CLAIM; } });
+    const policy = classifySqlError(hostile);
+    assert.equal(getterCount, 0, 'the operationPhase getter must never be invoked');
+    assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE, 'unavailable operationPhase must fail closed, never assumed to be CLAIM');
+  }
+  {
+    getterCount = 0;
+    const hostile = { diagnostics: { code: '08006' } };
+    Object.defineProperty(hostile, 'ambiguousCommit', { enumerable: true, get() { getterCount += 1; return true; } });
+    const policy = classifySqlError(hostile);
+    assert.equal(getterCount, 0, 'the ambiguousCommit getter must never be invoked');
+    assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT, 'unavailable ambiguousCommit must default to false');
+  }
+  {
+    getterCount = 0;
+    const hostile = { diagnostics: { code: '57014' } };
+    Object.defineProperty(hostile, 'commitInFlight', { enumerable: true, get() { getterCount += 1; return false; } });
+    const policy = classifySqlError(hostile);
+    assert.equal(getterCount, 0, 'the commitInFlight getter must never be invoked');
+    assert.equal(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT, 'unavailable commitInFlight must default to null, never treated as proven false');
+  }
+}
+
+console.log('  6. one combined object with accessor-only properties for all four fields at once: all four getter counters remain zero');
+{
+  const counts = { diagnostics: 0, operationPhase: 0, ambiguousCommit: 0, commitInFlight: 0 };
+  const hostile = {};
+  Object.defineProperty(hostile, 'diagnostics', { enumerable: true, get() { counts.diagnostics += 1; return { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }; } });
+  Object.defineProperty(hostile, 'operationPhase', { enumerable: true, get() { counts.operationPhase += 1; return OPERATION_PHASE.CLAIM; } });
+  Object.defineProperty(hostile, 'ambiguousCommit', { enumerable: true, get() { counts.ambiguousCommit += 1; return true; } });
+  Object.defineProperty(hostile, 'commitInFlight', { enumerable: true, get() { counts.commitInFlight += 1; return true; } });
+  const policy = classifySqlError(hostile);
+  assert.deepEqual(counts, { diagnostics: 0, operationPhase: 0, ambiguousCommit: 0, commitInFlight: 0 });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+}
+
+console.log('  7. setter-only properties for all four fields: treated as unavailable, no exception, conservative classification');
+{
+  const hostile = {};
+  for (const field of ['diagnostics', 'operationPhase', 'ambiguousCommit', 'commitInFlight']) {
+    Object.defineProperty(hostile, field, { enumerable: true, set() {} });
+  }
+  let policy;
+  assert.doesNotThrow(() => { policy = classifySqlError(hostile); });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+}
+
+console.log('  8. inherited (prototype-chain) values for all four fields at once: ignored, conservative classification, no exception');
+{
+  const proto = {
+    diagnostics: { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT },
+    operationPhase: OPERATION_PHASE.CLAIM,
+    ambiguousCommit: true,
+    commitInFlight: true
+  };
+  const inherited = Object.create(proto);
+  const policy = classifySqlError(inherited);
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT);
+}
+
+console.log('  9. every non-object/invalid options container is handled safely, fails closed, no exception: null, undefined, string, number, boolean, symbol, array, function, ordinary object, null-prototype object');
+{
+  for (const invalidOptions of [null, undefined, 'options', 42, true, Symbol('options'), [], () => {}]) {
+    let policy;
+    assert.doesNotThrow(() => { policy = classifySqlError(invalidOptions); }, `options=${String(invalidOptions)} must not throw`);
+    assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+  }
+  // ordinary plain object and null-prototype object with genuinely safe own
+  // data properties must remain fully functional (established behavior
+  // preserved, not merely "doesn't throw").
+  assert.equal(
+    classifySqlError({ diagnostics: { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }, operationPhase: OPERATION_PHASE.CLAIM }).classification,
+    WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE
+  );
+  const nullProtoOptions = Object.create(null);
+  nullProtoOptions.diagnostics = { code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT };
+  nullProtoOptions.operationPhase = OPERATION_PHASE.CLAIM;
+  assert.equal(classifySqlError(nullProtoOptions).classification, WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE);
+}
+
+console.log('  10. operationPhase value-shape matrix: lowercase, mixed-case and whitespace variants of CLAIM all fail closed, never accepted as CLAIM');
+{
+  for (const malformedPhase of ['claim', 'Claim', ' CLAIM', 'CLAIM ', 'CLAIM\n']) {
+    const policy = classifySqlError({ diagnostics: { code: '23503' }, operationPhase: malformedPhase });
+    assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE, `operationPhase=${JSON.stringify(malformedPhase)} must not be accepted as CLAIM`);
+  }
+}
+
+console.log('  ordinary-object regression: the safety correction changes no legitimate classification');
+{
+  // 23503 phase matrix, re-verified against the corrected top-level reads.
+  assert.equal(
+    classifySqlError({ diagnostics: { code: '23503' }, operationPhase: OPERATION_PHASE.CLAIM }).classification,
+    WRITER_OUTCOME.INVALID_PARENT_OR_TENANT
+  );
+  assert.equal(
+    classifySqlError({ diagnostics: { code: '23503' }, operationPhase: OPERATION_PHASE.CANONICAL_MUTATION }).classification,
+    WRITER_OUTCOME.INTERNAL_FAILURE
+  );
+  assert.equal(
+    classifySqlError({ diagnostics: { code: '23503' }, operationPhase: OPERATION_PHASE.TERMINAL_UPDATE }).classification,
+    WRITER_OUTCOME.INTERNAL_FAILURE
+  );
+
+  // known 23505 + correct phase.
+  assert.equal(
+    classifyRaw({ code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }, { operationPhase: OPERATION_PHASE.CLAIM }).classification,
+    WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE
+  );
+
+  // exact manual-precedence classification.
+  assert.equal(
+    classifyRaw({ code: '23514', message: ORDER_MANUAL_PRECEDENCE_MESSAGE }).classification,
+    WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE
+  );
+
+  // ambiguousCommit behavior.
+  assert.equal(
+    classifySqlError({ diagnostics: extractSafeDiagnostics({ code: '08006' }), ambiguousCommit: true }).classification,
+    WRITER_OUTCOME.AMBIGUOUS_COMMIT
+  );
+
+  // commitInFlight behavior.
+  assert.equal(
+    classifyRaw({ code: '57014' }, { commitInFlight: false }).classification,
+    WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE
+  );
+  assert.equal(
+    classifyRaw({ code: '57014' }).classification,
+    WRITER_OUTCOME.AMBIGUOUS_COMMIT
+  );
+
+  // retryable transaction behavior.
+  assert.equal(classifyRaw({ code: '40001' }).classification, WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE);
+
+  // no-blind-retry behavior: unchanged retry-policy metadata for the
+  // no-retry classes.
+  assert.equal(
+    classifyRaw({ code: '23505', constraint: LEDGER_CLAIM_KEY_CONSTRAINT }, { operationPhase: OPERATION_PHASE.CLAIM }).blindRetryAllowed,
+    false
+  );
+  assert.equal(classifyRaw({ code: '55000' }).blindRetryAllowed, false);
+}
+
+console.log('Gate 2D.1B.2A correction: the outer options container itself must be a plain metadata object (Object.prototype or null-prototype) -- non-plain containers with valid-looking own data properties must never influence classification');
+
+function attachForgedFields(container) {
+  container.diagnostics = { code: '23503' };
+  container.operationPhase = OPERATION_PHASE.CLAIM;
+  container.ambiguousCommit = true;
+  container.commitInFlight = false;
+  return container;
+}
+
+function assertForgedContainerIsInert(container, label) {
+  let policy;
+  assert.doesNotThrow(() => { policy = classifySqlError(container); }, `${label} must not throw`);
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE, `${label}: forged fields must not affect classification`);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, `${label}: forged operationPhase=CLAIM must not produce INVALID_PARENT_OR_TENANT`);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT, `${label}: forged ambiguousCommit=true must not produce AMBIGUOUS_COMMIT`);
+}
+
+console.log('  1. an array carrying valid-looking own data properties (diagnostics 23503, operationPhase CLAIM, ambiguousCommit true, commitInFlight false): none of the forged values affects classification, result is conservative');
+{
+  const forgedArray = attachForgedFields([]);
+  assertForgedContainerIsInert(forgedArray, 'forged array');
+}
+
+console.log('  2. a custom class instance carrying the same forged own data properties: rejected as a non-plain container');
+{
+  class WriterOptionsLike {}
+  const instance = attachForgedFields(new WriterOptionsLike());
+  assertForgedContainerIsInert(instance, 'forged class instance');
+}
+
+console.log('  3. a Date instance carrying the same forged own data properties: rejected as a non-plain container');
+{
+  const forgedDate = attachForgedFields(new Date());
+  assertForgedContainerIsInert(forgedDate, 'forged Date');
+}
+
+console.log('  4. a Map instance carrying the same forged own data properties: rejected as a non-plain container');
+{
+  const forgedMap = attachForgedFields(new Map());
+  assertForgedContainerIsInert(forgedMap, 'forged Map');
+}
+
+console.log('  5. a Set instance carrying the same forged own data properties: rejected as a non-plain container');
+{
+  const forgedSet = attachForgedFields(new Set());
+  assertForgedContainerIsInert(forgedSet, 'forged Set');
+}
+
+console.log('  6. a RegExp instance carrying the same forged own data properties: rejected as a non-plain container');
+{
+  const forgedRegExp = attachForgedFields(/x/);
+  assertForgedContainerIsInert(forgedRegExp, 'forged RegExp');
+}
+
+console.log('  7. an Error instance carrying the same forged own data properties: rejected as a non-plain container');
+{
+  const forgedError = attachForgedFields(new Error('not real options'));
+  assertForgedContainerIsInert(forgedError, 'forged Error');
+}
+
+console.log('  8. a typed array carrying the same forged own data properties (where the type permits named properties): rejected as a non-plain container');
+{
+  const forgedTypedArray = attachForgedFields(new Uint8Array(4));
+  assertForgedContainerIsInert(forgedTypedArray, 'forged Uint8Array');
+}
+
+console.log('  9. no getter or trap executes while rejecting a forged non-plain container: accessor-backed forged fields on a class instance');
+{
+  class WriterOptionsLike {}
+  const instance = new WriterOptionsLike();
+  const counts = { diagnostics: 0, operationPhase: 0, ambiguousCommit: 0, commitInFlight: 0 };
+  Object.defineProperty(instance, 'diagnostics', { enumerable: true, get() { counts.diagnostics += 1; return { code: '23503' }; } });
+  Object.defineProperty(instance, 'operationPhase', { enumerable: true, get() { counts.operationPhase += 1; return OPERATION_PHASE.CLAIM; } });
+  Object.defineProperty(instance, 'ambiguousCommit', { enumerable: true, get() { counts.ambiguousCommit += 1; return true; } });
+  Object.defineProperty(instance, 'commitInFlight', { enumerable: true, get() { counts.commitInFlight += 1; return false; } });
+  const policy = classifySqlError(instance);
+  assert.deepEqual(counts, { diagnostics: 0, operationPhase: 0, ambiguousCommit: 0, commitInFlight: 0 });
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+}
+
+console.log('  10. ambiguousCommit from a rejected container is independently, unconditionally gated (checked before the sqlstate switch) -- a forged array with ONLY ambiguousCommit=true set must never classify as AMBIGUOUS_COMMIT');
+{
+  const forgedAmbiguousOnly = attachAmbiguousCommitOnly([]);
+  const policy = classifySqlError(forgedAmbiguousOnly);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT);
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+}
+function attachAmbiguousCommitOnly(container) {
+  container.ambiguousCommit = true;
+  return container;
+}
+
+console.log('  11. operationPhase and commitInFlight from a rejected container are structurally inert even in isolation: both are consulted only inside sqlstate-specific branches, and sqlstate resolution depends on the SAME safeOptions gate as diagnostics -- a rejected container can never smuggle a matching diagnostics through that gate, so its forged operationPhase/commitInFlight can never reach a branch that would consult them');
+{
+  // A non-plain container carrying ONLY operationPhase: diagnostics is
+  // necessarily unavailable too (same gate), so sqlstate is null and the
+  // default branch fires -- operationPhase is provably never reached.
+  const forgedPhaseOnly = [];
+  forgedPhaseOnly.operationPhase = OPERATION_PHASE.CLAIM;
+  assert.equal(classifySqlError(forgedPhaseOnly).classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+
+  // Same reasoning for commitInFlight, which is only consulted inside
+  // case "57014" -- unreachable without a matching, equally-gated sqlstate.
+  const forgedCommitInFlightOnly = [];
+  forgedCommitInFlightOnly.commitInFlight = false;
+  const policy = classifySqlError(forgedCommitInFlightOnly);
+  assert.notEqual(policy.classification, WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE);
+  assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+}
+
+console.log('Gate 2D.1B.2A correction: both accepted plain-container forms remain fully functional -- {} and Object.create(null)');
+
+for (const [label, makeContainer] of [
+  ['{} ordinary object', () => ({})],
+  ['Object.create(null)', () => Object.create(null)]
+]) {
+  console.log(`  ${label}: own-data diagnostics and CLAIM accepted; full phase/ambiguousCommit/commitInFlight behavior unchanged`);
+  {
+    const claimContainer = makeContainer();
+    claimContainer.diagnostics = { code: '23503' };
+    claimContainer.operationPhase = OPERATION_PHASE.CLAIM;
+    assert.equal(classifySqlError(claimContainer).classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, `${label}: 23503 + CLAIM`);
+
+    const canonicalContainer = makeContainer();
+    canonicalContainer.diagnostics = { code: '23503' };
+    canonicalContainer.operationPhase = OPERATION_PHASE.CANONICAL_MUTATION;
+    assert.equal(classifySqlError(canonicalContainer).classification, WRITER_OUTCOME.INTERNAL_FAILURE, `${label}: 23503 + CANONICAL_MUTATION`);
+
+    const terminalContainer = makeContainer();
+    terminalContainer.diagnostics = { code: '23503' };
+    terminalContainer.operationPhase = OPERATION_PHASE.TERMINAL_UPDATE;
+    assert.equal(classifySqlError(terminalContainer).classification, WRITER_OUTCOME.INTERNAL_FAILURE, `${label}: 23503 + TERMINAL_UPDATE`);
+
+    const ambiguousContainer = makeContainer();
+    ambiguousContainer.diagnostics = { code: '08006' };
+    ambiguousContainer.ambiguousCommit = true;
+    assert.equal(classifySqlError(ambiguousContainer).classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT, `${label}: ambiguousCommit=true`);
+
+    const commitInFlightFalseContainer = makeContainer();
+    commitInFlightFalseContainer.diagnostics = { code: '57014' };
+    commitInFlightFalseContainer.commitInFlight = false;
+    assert.equal(classifySqlError(commitInFlightFalseContainer).classification, WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE, `${label}: commitInFlight=false`);
+
+    const commitInFlightAbsentContainer = makeContainer();
+    commitInFlightAbsentContainer.diagnostics = { code: '57014' };
+    assert.equal(classifySqlError(commitInFlightAbsentContainer).classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT, `${label}: commitInFlight absent defaults to ambiguous`);
+  }
+}
+
+console.log('Gate 2D.1B.2A correction: prototype-inspection failure on the top-level options container fails closed to INTERNAL_FAILURE and restores global state');
+{
+  const originalGetPrototypeOf = Object.getPrototypeOf;
+  const sentinelOptions = {
+    diagnostics: { code: '23503' },
+    operationPhase: OPERATION_PHASE.CLAIM,
+    ambiguousCommit: true,
+    commitInFlight: false
+  };
+  let policy;
+
+  try {
+    Object.getPrototypeOf = (value) => {
+      if (value === sentinelOptions) {
+        throw new Error('forced options prototype-inspection failure');
+      }
+      return originalGetPrototypeOf(value);
+    };
+
+    assert.doesNotThrow(() => {
+      policy = classifySqlError(sentinelOptions);
+    });
+    assert.equal(policy.classification, WRITER_OUTCOME.INTERNAL_FAILURE);
+    assert.notEqual(policy.classification, WRITER_OUTCOME.INVALID_PARENT_OR_TENANT);
+    assert.notEqual(policy.classification, WRITER_OUTCOME.AMBIGUOUS_COMMIT);
+    assert.notEqual(policy.classification, WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE);
+  } finally {
+    Object.getPrototypeOf = originalGetPrototypeOf;
+  }
+
+  assert.equal(Object.getPrototypeOf, originalGetPrototypeOf, 'the exact original Object.getPrototypeOf reference must be restored after classifier integration coverage');
+  assert.equal(
+    classifySqlError({ diagnostics: { code: '23503' }, operationPhase: OPERATION_PHASE.CLAIM }).classification,
+    WRITER_OUTCOME.INVALID_PARENT_OR_TENANT,
+    'ordinary-object CLAIM classification must remain intact after restoration'
+  );
+}
+
+console.log('PASS: the complete top-level options trust boundary holds -- no caller-controlled getter or Proxy trap executes before fail-closed validation');
 
 console.log('PASS: conflict classifier policy metadata is correct and side-effect free');

@@ -88,12 +88,24 @@ const OUTCOME_RULES = Object.freeze({
     optional: ["observedActiveLinkId", "rereadPerformed", "retryPerformed", "replayed"]
   },
   [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT]: {
+    // replayed is deliberately NOT listed here: the future atomic writer's
+    // operation-ledger reference-validation trigger can reject the initial
+    // CLAIMED insert itself (SQLSTATE 23503) before any operation row
+    // exists to persist a terminal FAILED status against -- see
+    // projectLinkWriterResultLedgerMapper.js's NO_LEDGER_WRITE mapping for
+    // this outcome. An outcome that can never be durably persisted as a
+    // terminal row can never legitimately be "replayed" from one either.
     required: ["safeDiagnosticCode"],
-    optional: ["replayed"]
+    optional: []
   },
   [WRITER_OUTCOME.FORBIDDEN]: {
+    // replayed is deliberately NOT listed here, for the same reason as
+    // INVALID_PARENT_OR_TENANT above: SQLSTATE 42501 can occur before the
+    // claim insert itself succeeds (the caller lacked INSERT privilege on
+    // project_link_operations), leaving no row to persist a terminal status
+    // against -- see the mapper's NO_LEDGER_WRITE mapping for this outcome.
     required: ["safeDiagnosticCode"],
-    optional: ["replayed"]
+    optional: []
   },
   [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE]: {
     required: ["safeDiagnosticCode"],
@@ -249,6 +261,19 @@ function assertNoUnknownOwnDataProperties(metadata) {
  * a simple consequence of this general rule (an outcome allows replayed if
  * and only if OUTCOME_RULES lists it), rather than a separately maintained
  * list.
+ *
+ * The replay-eligible outcomes are therefore exactly those whose
+ * OUTCOME_RULES entry lists "replayed" as required or optional -- which, as
+ * of this module's current rules, is the five SUCCESS_* outcomes,
+ * BLOCKED_MANUAL_PRECEDENCE, and INTERNAL_FAILURE: outcomes that are always
+ * physically achievable as a durably-persisted terminal row (see
+ * projectLinkWriterResultLedgerMapper.js's PERSIST_TERMINAL mapping for all
+ * of them). INVALID_PARENT_OR_TENANT and FORBIDDEN are excluded from that
+ * set -- both can occur before the operation-ledger claim row itself exists
+ * (SQLSTATE 23503 from the reference-validation trigger; SQLSTATE 42501
+ * from a missing INSERT privilege), so neither can ever have been durably
+ * persisted as a terminal row in the first place, and therefore neither can
+ * ever legitimately be "replayed" from one.
  */
 export function buildWriterResult(outcome, metadata = {}) {
   const rules = OUTCOME_RULES[outcome];

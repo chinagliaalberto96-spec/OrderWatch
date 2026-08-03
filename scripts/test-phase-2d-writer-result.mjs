@@ -421,6 +421,15 @@ console.log('  CONFLICT_IDEMPOTENCY_KEY_REUSE: prohibited decision/link metadata
 // "replayed" among its optional fields. Each entry carries the minimum
 // extra metadata that outcome otherwise requires, so every case below can
 // be exercised for every eligible outcome, not just one representative.
+//
+// INVALID_PARENT_OR_TENANT and FORBIDDEN are deliberately NOT in this list:
+// both can occur before the operation-ledger claim row itself exists
+// (SQLSTATE 23503 from the reference-validation trigger; SQLSTATE 42501
+// from a missing INSERT privilege), so neither can ever have been durably
+// persisted as a terminal row -- see the "derived from the actual outcome
+// rules" test immediately below, and the dedicated rejection tests further
+// down, which prove this by BEHAVIOR (calling buildWriterResult), not just
+// by this list's own membership.
 const REPLAY_ELIGIBLE_CASES = [
   [WRITER_OUTCOME.SUCCESS_CREATED, { decisionId: UUID_A, resultLinkId: UUID_B }],
   [WRITER_OUTCOME.SUCCESS_REACTIVATED, { decisionId: UUID_A, resultLinkId: UUID_B }],
@@ -428,10 +437,59 @@ const REPLAY_ELIGIBLE_CASES = [
   [WRITER_OUTCOME.SUCCESS_TERMINALLY_ENDED, { decisionId: UUID_A, priorLinkId: UUID_C }],
   [WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT, {}],
   [WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE, { safeDiagnosticCode: 'MANUAL_PRECEDENCE' }],
-  [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, { safeDiagnosticCode: 'SQLSTATE_23503' }],
-  [WRITER_OUTCOME.FORBIDDEN, { safeDiagnosticCode: 'SQLSTATE_42501' }],
   [WRITER_OUTCOME.INTERNAL_FAILURE, { safeDiagnosticCode: 'UNKNOWN' }]
 ];
+
+// Minimum extra metadata required to successfully build EVERY declared
+// WRITER_OUTCOME, used only to derive replay-eligibility behaviorally below
+// -- independent of, and not trusting, REPLAY_ELIGIBLE_CASES above.
+const MINIMUM_METADATA_BY_OUTCOME = {
+  [WRITER_OUTCOME.SUCCESS_CREATED]: { decisionId: UUID_A, resultLinkId: UUID_B },
+  [WRITER_OUTCOME.SUCCESS_REACTIVATED]: { decisionId: UUID_A, resultLinkId: UUID_B },
+  [WRITER_OUTCOME.SUCCESS_REPLACED]: { decisionId: UUID_A, resultLinkId: UUID_B, priorLinkId: UUID_C },
+  [WRITER_OUTCOME.SUCCESS_TERMINALLY_ENDED]: { decisionId: UUID_A, priorLinkId: UUID_C },
+  [WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT]: {},
+  [WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE]: { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_23505' },
+  [WRITER_OUTCOME.CONFLICT_STALE_STATE]: { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_55000' },
+  [WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE]: { safeDiagnosticCode: 'SQLSTATE_23505' },
+  [WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE]: { safeDiagnosticCode: 'MANUAL_PRECEDENCE' },
+  [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT]: { safeDiagnosticCode: 'SQLSTATE_23503' },
+  [WRITER_OUTCOME.FORBIDDEN]: { safeDiagnosticCode: 'SQLSTATE_42501' },
+  [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE]: { safeDiagnosticCode: 'SQLSTATE_40001' },
+  [WRITER_OUTCOME.AMBIGUOUS_COMMIT]: { safeDiagnosticCode: 'SQLSTATE_57014' },
+  [WRITER_OUTCOME.INTERNAL_FAILURE]: { safeDiagnosticCode: 'UNKNOWN' }
+};
+
+console.log('  the replay-eligible outcome set, derived behaviorally from the actual outcome rules (not merely counted), is exactly the five SUCCESS_* outcomes, BLOCKED_MANUAL_PRECEDENCE and INTERNAL_FAILURE');
+{
+  const expectedEligible = new Set([
+    WRITER_OUTCOME.SUCCESS_CREATED,
+    WRITER_OUTCOME.SUCCESS_REACTIVATED,
+    WRITER_OUTCOME.SUCCESS_REPLACED,
+    WRITER_OUTCOME.SUCCESS_TERMINALLY_ENDED,
+    WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT,
+    WRITER_OUTCOME.BLOCKED_MANUAL_PRECEDENCE,
+    WRITER_OUTCOME.INTERNAL_FAILURE
+  ]);
+  const derivedEligible = new Set();
+  for (const outcome of Object.values(WRITER_OUTCOME)) {
+    const extra = MINIMUM_METADATA_BY_OUTCOME[outcome];
+    let accepted = true;
+    try {
+      buildWriterResult(outcome, { ...BASE, ...extra, replayed: true });
+    } catch {
+      accepted = false;
+    }
+    if (accepted) derivedEligible.add(outcome);
+  }
+  assert.deepEqual(
+    [...derivedEligible].sort(),
+    [...expectedEligible].sort(),
+    'the behaviorally-derived replay-eligible set must match exactly the five SUCCESS_* outcomes plus BLOCKED_MANUAL_PRECEDENCE and INTERNAL_FAILURE -- no more, no fewer'
+  );
+  assert.equal(derivedEligible.has(WRITER_OUTCOME.INVALID_PARENT_OR_TENANT), false, 'INVALID_PARENT_OR_TENANT must not be replay-eligible');
+  assert.equal(derivedEligible.has(WRITER_OUTCOME.FORBIDDEN), false, 'FORBIDDEN must not be replay-eligible');
+}
 
 console.log('  absent replayed is accepted (no own property at all): valid, and the field is simply not present in the result');
 {
@@ -543,14 +601,16 @@ console.log('  function and symbol values for replayed are rejected');
   );
 }
 
-console.log('  replayed (true or false) is rejected for non-replay-eligible outcomes: recovery, conflict and retryable-transaction outcomes');
+console.log('  replayed (true or false) is rejected for non-replay-eligible outcomes: recovery, conflict, retryable-transaction, invalid-parent-or-tenant and forbidden outcomes');
 {
   const nonEligibleCases = [
     [WRITER_OUTCOME.AMBIGUOUS_COMMIT, { safeDiagnosticCode: 'SQLSTATE_57014' }],
     [WRITER_OUTCOME.CONFLICT_CONCURRENT_CHANGE, { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_23505' }],
     [WRITER_OUTCOME.CONFLICT_STALE_STATE, { rereadPerformed: true, retryPerformed: false, safeDiagnosticCode: 'SQLSTATE_55000' }],
     [WRITER_OUTCOME.CONFLICT_IDEMPOTENCY_KEY_REUSE, { safeDiagnosticCode: 'SQLSTATE_23505' }],
-    [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE, { safeDiagnosticCode: 'SQLSTATE_40001' }]
+    [WRITER_OUTCOME.RETRYABLE_TRANSACTION_FAILURE, { safeDiagnosticCode: 'SQLSTATE_40001' }],
+    [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, { safeDiagnosticCode: 'SQLSTATE_23503' }],
+    [WRITER_OUTCOME.FORBIDDEN, { safeDiagnosticCode: 'SQLSTATE_42501' }]
   ];
   for (const [outcome, extra] of nonEligibleCases) {
     assert.throws(
@@ -568,11 +628,54 @@ console.log('  replayed (true or false) is rejected for non-replay-eligible outc
   }
 }
 
+console.log('  INVALID_PARENT_OR_TENANT and FORBIDDEN reject replayed for every supplied value shape, since no terminal row can physically exist for either outcome to be replayed from');
+{
+  const correctedOutcomeCases = [
+    [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, { safeDiagnosticCode: 'SQLSTATE_23503' }],
+    [WRITER_OUTCOME.FORBIDDEN, { safeDiagnosticCode: 'SQLSTATE_42501' }]
+  ];
+  const replayedValueShapes = [
+    ['true', true],
+    ['false', false],
+    ['null', null],
+    ['string', 'true'],
+    ['number', 1],
+    ['array', []],
+    ['object', {}],
+    ['function', () => true],
+    ['symbol', Symbol('replayed')]
+  ];
+  for (const [outcome, extra] of correctedOutcomeCases) {
+    for (const [label, value] of replayedValueShapes) {
+      assert.throws(
+        () => buildWriterResult(outcome, { ...BASE, ...extra, replayed: value }),
+        /replayed non è ammesso/,
+        `replayed=${label} must be rejected for ${outcome}`
+      );
+    }
+    // own replayed=undefined (a genuine own property, distinct from
+    // entirely absent) must also be rejected, exactly like every other
+    // prohibited-field value shape.
+    const withOwnUndefined = { ...BASE, ...extra };
+    Object.defineProperty(withOwnUndefined, 'replayed', { enumerable: true, value: undefined });
+    assert.throws(
+      () => buildWriterResult(outcome, withOwnUndefined),
+      /replayed non è ammesso/,
+      `own replayed=undefined must be rejected for ${outcome}`
+    );
+    // absent replayed remains valid (the outcome itself is still buildable
+    // without it -- only its presence is prohibited).
+    assert.doesNotThrow(() => buildWriterResult(outcome, { ...BASE, ...extra }));
+  }
+}
+
 console.log('  hostile getter for replayed is never invoked, whether the outcome is eligible or not');
 {
   for (const [outcome, extra] of [
     [WRITER_OUTCOME.SUCCESS_ALREADY_CURRENT, {}],
-    [WRITER_OUTCOME.AMBIGUOUS_COMMIT, { safeDiagnosticCode: 'SQLSTATE_57014' }]
+    [WRITER_OUTCOME.AMBIGUOUS_COMMIT, { safeDiagnosticCode: 'SQLSTATE_57014' }],
+    [WRITER_OUTCOME.INVALID_PARENT_OR_TENANT, { safeDiagnosticCode: 'SQLSTATE_23503' }],
+    [WRITER_OUTCOME.FORBIDDEN, { safeDiagnosticCode: 'SQLSTATE_42501' }]
   ]) {
     let getterInvoked = false;
     const hostile = { ...BASE, ...extra };

@@ -19,12 +19,96 @@ console.log('  isPlainMetadataObject accepts only literal objects');
   assert.equal(isPlainMetadataObject({}), true);
   assert.equal(isPlainMetadataObject(Object.create(null)), true);
   assert.equal(isPlainMetadataObject([]), false);
+  assert.equal(isPlainMetadataObject(new Date()), false);
+  assert.equal(isPlainMetadataObject(new Map()), false);
+  assert.equal(isPlainMetadataObject(new Set()), false);
+  assert.equal(isPlainMetadataObject(new WeakMap()), false);
+  assert.equal(isPlainMetadataObject(new WeakSet()), false);
+  assert.equal(isPlainMetadataObject(/x/), false);
   assert.equal(isPlainMetadataObject(new Error('x')), false);
+  assert.equal(isPlainMetadataObject(Promise.resolve()), false);
+  assert.equal(isPlainMetadataObject(new ArrayBuffer(8)), false);
+  assert.equal(isPlainMetadataObject(new DataView(new ArrayBuffer(8))), false);
+  assert.equal(isPlainMetadataObject(new Uint8Array(8)), false);
   assert.equal(isPlainMetadataObject(() => {}), false);
   assert.equal(isPlainMetadataObject(null), false);
   assert.equal(isPlainMetadataObject('x'), false);
+  assert.equal(isPlainMetadataObject(1n), false);
+  assert.equal(isPlainMetadataObject(Symbol('x')), false);
   assert.equal(isPlainMetadataObject(class Foo {}), false);
   assert.equal(isPlainMetadataObject(new (class Foo {})()), false);
+}
+
+console.log('  prototype-inspection failure is rejected fail-closed and Object.getPrototypeOf is restored exactly');
+{
+  const originalGetPrototypeOf = Object.getPrototypeOf;
+  const sentinel = {};
+  let result;
+
+  try {
+    Object.getPrototypeOf = (value) => {
+      if (value === sentinel) {
+        throw new Error('forced prototype-inspection failure');
+      }
+      return originalGetPrototypeOf(value);
+    };
+
+    assert.doesNotThrow(() => {
+      result = isPlainMetadataObject(sentinel);
+    });
+    assert.equal(result, false, 'an uninspectable prototype must be rejected conservatively');
+  } finally {
+    Object.getPrototypeOf = originalGetPrototypeOf;
+  }
+
+  assert.equal(Object.getPrototypeOf, originalGetPrototypeOf, 'the exact original Object.getPrototypeOf reference must be restored');
+  assert.equal(isPlainMetadataObject({}), true);
+  assert.equal(isPlainMetadataObject(Object.create(null)), true);
+  assert.equal(isPlainMetadataObject(new (class Foo {})()), false);
+}
+
+console.log('  Proxy rejection occurs before prototype inspection, including throwing and revoked Proxies');
+{
+  const originalGetPrototypeOf = Object.getPrototypeOf;
+  let proxyPrototypeInspectionCalls = 0;
+  let proxyTrapCalls = 0;
+  const ordinaryProxy = new Proxy({}, {
+    getPrototypeOf() {
+      proxyTrapCalls += 1;
+      throw new Error('ordinary Proxy getPrototypeOf trap fired');
+    }
+  });
+  const throwingProxy = new Proxy({}, {
+    get() {
+      proxyTrapCalls += 1;
+      throw new Error('throwing Proxy get trap fired');
+    },
+    getPrototypeOf() {
+      proxyTrapCalls += 1;
+      throw new Error('throwing Proxy getPrototypeOf trap fired');
+    }
+  });
+  const { proxy: revokedProxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  const proxyValues = [ordinaryProxy, throwingProxy, revokedProxy];
+
+  try {
+    Object.getPrototypeOf = (value) => {
+      if (proxyValues.includes(value)) proxyPrototypeInspectionCalls += 1;
+      return originalGetPrototypeOf(value);
+    };
+
+    for (const proxyValue of proxyValues) {
+      assert.doesNotThrow(() => isPlainMetadataObject(proxyValue));
+      assert.equal(isPlainMetadataObject(proxyValue), false);
+    }
+  } finally {
+    Object.getPrototypeOf = originalGetPrototypeOf;
+  }
+
+  assert.equal(proxyPrototypeInspectionCalls, 0, 'Proxy inputs must never reach Object.getPrototypeOf');
+  assert.equal(proxyTrapCalls, 0, 'no Proxy trap may execute during rejection');
+  assert.equal(Object.getPrototypeOf, originalGetPrototypeOf);
 }
 
 console.log('  readOwnDataProperty never invokes a getter');
