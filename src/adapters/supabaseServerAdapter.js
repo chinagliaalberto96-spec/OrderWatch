@@ -134,8 +134,12 @@ export function createSupabaseAdapter({ url, serviceKey, organizationId }) {
     const response = await fetch(`${url}/rest/v1/${scopePath(path, method)}`, {
       method,
       headers: {
+        // Only apikey identifies the service role to PostgREST. The
+        // sb_secret_ key format is not a JWT and must never be sent as an
+        // Authorization Bearer token -- see server/lib/_auth.js for the one
+        // place a Bearer header is legitimate here (the end-user session
+        // JWT, never this key).
         apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
         "Content-Type": "application/json",
         ...headers
       },
