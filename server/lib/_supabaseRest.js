@@ -29,19 +29,63 @@ export function withOrg(body, organizationId) {
   return { ...rest, organization_id: organizationId };
 }
 
+/**
+ * Recognizes a legacy Supabase service_role key, which is a JWT: three
+ * base64url segments separated by dots, the header segment starting with the
+ * "eyJ" that base64url-encodes '{"'. Deliberately conservative -- an opaque
+ * string that is merely "not sb_secret_" is NOT treated as a legacy JWT, so
+ * an unrecognized key never gets sent as a Bearer credential. The payload is
+ * never decoded or inspected.
+ */
+export function isLegacyServiceRoleJwt(key) {
+  return /^eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(String(key || ""));
+}
+
+/**
+ * Project authentication headers for the two key generations supported
+ * during the migration window:
+ *
+ *   NEW  sb_secret_...  -> apikey only. These keys are opaque, not JWTs, and
+ *                          must never be sent as Authorization Bearer.
+ *   LEGACY service_role -> apikey + Authorization Bearer (the same JWT).
+ *                          Legacy service_role semantics, including RLS
+ *                          bypass, depend on the Bearer form, so it is
+ *                          preserved until configuration is migrated.
+ *
+ * Anything unrecognized is treated as the safer new-key case (apikey only).
+ */
+function projectAuthHeaders(serviceKey) {
+  return isLegacyServiceRoleJwt(serviceKey)
+    ? { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` }
+    : { apikey: serviceKey };
+}
+
+/**
+ * Drops any caller-supplied header that would place the project/service key
+ * into an Authorization credential, under any header-name casing. No runtime
+ * caller supplies Authorization today (all 51 header-passing call sites pass
+ * only Prefer), and no user-scoped Authorization mechanism flows through this
+ * client -- server/lib/_auth.js sends the end-user JWT on its own fetch. An
+ * Authorization header carrying some other value is left untouched, so this
+ * cannot break a future user-scoped mechanism.
+ */
+function stripServiceKeyAuthorization(headers, serviceKey) {
+  const safe = {};
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (name.toLowerCase() === "authorization" && String(value).includes(serviceKey)) continue;
+    safe[name] = value;
+  }
+  return safe;
+}
+
 export async function supabaseRequest(path, { method = "GET", body, headers = {} } = {}) {
   const { url, serviceKey } = getSupabaseConfig();
   const response = await fetch(`${url}/rest/v1/${path}`, {
     method,
     headers: {
-      // Only apikey identifies the service role to PostgREST. The
-      // sb_secret_ key format is not a JWT and must never be sent as an
-      // Authorization Bearer token -- see server/lib/_auth.js for the one
-      // place a Bearer header is legitimate here (the end-user session
-      // JWT, never this key).
-      apikey: serviceKey,
       "Content-Type": "application/json",
-      ...headers
+      ...stripServiceKeyAuthorization(headers, serviceKey),
+      ...projectAuthHeaders(serviceKey)
     },
     body: body ? JSON.stringify(body) : undefined
   });
