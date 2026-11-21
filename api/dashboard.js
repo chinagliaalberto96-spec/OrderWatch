@@ -1,4 +1,4 @@
-import { createDataAdapter, resolveDataSource } from "../server/lib/_dataSource.js";
+import { DataSourceConfigError, selectDataAdapter, sendDataSourceUnavailable } from "../server/lib/_dataSource.js";
 import { authorizeApiRequest } from "../server/lib/_auth.js";
 
 export default async function handler(request, response) {
@@ -11,8 +11,9 @@ export default async function handler(request, response) {
   }
 
   try {
-    const source = resolveDataSource(request.query?.source);
-    const adapter = createDataAdapter(source, user.organizationId);
+    // La sorgente arriva solo dalla configurazione server: request.query.source
+    // e qualunque altro input del client vengono ignorati.
+    const { source, adapter } = selectDataAdapter(user);
     const data = await adapter.getDashboardData();
     data.meta = {
       dataSource: source,
@@ -22,6 +23,10 @@ export default async function handler(request, response) {
     response.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
     response.status(200).json(data);
   } catch (error) {
+    if (error instanceof DataSourceConfigError) {
+      sendDataSourceUnavailable(response);
+      return;
+    }
     response.status(500).json({
       error: "Unable to load dashboard data",
       detail: error.message

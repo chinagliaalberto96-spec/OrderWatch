@@ -1,4 +1,4 @@
-import { createDataAdapter } from "../lib/_dataSource.js";
+import { DataSourceConfigError, selectDataAdapter, sendDataSourceUnavailable } from "../lib/_dataSource.js";
 import { authorizeApiRequest } from "../lib/_auth.js";
 import { WORKFLOW_MODE_VALUES } from "../../src/config/workflowModes.js";
 
@@ -33,7 +33,8 @@ export default async function handler(request, response) {
   }
 
   try {
-    const adapter = createDataAdapter(request.query?.source || request.body?.source, user.organizationId);
+    // Sorgente solo da configurazione server: "source" in query o body e' ignorato.
+    const { adapter } = selectDataAdapter(user);
 
     const { id, value, status, description } = request.body || {};
 
@@ -86,6 +87,10 @@ export default async function handler(request, response) {
     response.setHeader("Cache-Control", "no-store");
     response.status(200).json({ setting: updated });
   } catch (error) {
+    if (error instanceof DataSourceConfigError) {
+      sendDataSourceUnavailable(response);
+      return;
+    }
     response.status(500).json({
       error: "Unable to update setting",
       detail: error.message
